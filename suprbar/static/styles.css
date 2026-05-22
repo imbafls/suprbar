@@ -903,6 +903,10 @@ body.compact .range-tabs .rt { font-size: 10px; padding: 4px 0; }
 .bs-fill.over { background: linear-gradient(90deg, var(--b-danger), #ef4444); }
 .bs-pct { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Fetch-in-flight cue on the cost number (when no client cache yet). */
+.cost.loading { opacity: 0.55; }
+.cost.loading .cents { opacity: 0.4; }
+
 /* ────────────────────────────────────────────────────────────────────────
    Settings — search + dynamic sections + controls
    ──────────────────────────────────────────────────────────────────────── */

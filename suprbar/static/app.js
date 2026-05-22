@@ -307,6 +307,11 @@ function statusMessage(status, errMsg) {
 }
 
 async function load({ refresh = false } = {}) {
+  // Range routing: if user picked a non-"today" tab, fetch /api/range instead.
+  // Using a window property so the let-binding (further down) is irrelevant.
+  if (window.__suprbar_range && window.__suprbar_range !== 'today') {
+    return loadRange({ refresh });
+  }
   // Cancel any in-flight request (#18)
   if (inflightController) {
     try { inflightController.abort(); } catch (_) { /* ignore */ }
@@ -900,40 +905,94 @@ const LABELS = {
 
 // ──── Range tab handlers ────
 
+window.__suprbar_range = window.__suprbar_range || 'today';
+
+// Client-side cache: key → last successful payload. Lets a tab click paint
+// instantly while a fresh request runs in the background.
+const _rangeCache = new Map();
+const _rangeInflight = new Map();
+
 function setRange(key) {
   if (!key) return;
   currentRange = key;
+  window.__suprbar_range = key;
   document.querySelectorAll('.range-tabs .rt').forEach(b => {
     b.classList.toggle('active', b.dataset.range === key);
+    if (b.dataset.range === key) b.setAttribute('aria-selected', 'true');
+    else b.removeAttribute('aria-selected');
   });
-  load({ refresh: true });
+  // 1) Paint cached immediately if we have it (snappy).
+  const cached = _rangeCache.get(key);
+  if (cached) {
+    if (key === 'today') {
+      // today is fetched via /api/today; cached shape differs, just render() if exists
+      if (typeof render === 'function') render(cached);
+    } else {
+      renderRangeData(cached);
+    }
+  } else {
+    // Show a tiny "loading…" hint by dimming the cost number briefly.
+    document.getElementById('costNum')?.classList.add('loading');
+  }
+  // 2) Fetch fresh in the background; replaces the paint when it arrives.
+  load({ refresh: true }).then(() => {
+    document.getElementById('costNum')?.classList.remove('loading');
+  });
 }
 
 document.querySelectorAll('.range-tabs .rt').forEach(btn => {
   btn.addEventListener('click', () => setRange(btn.dataset.range));
 });
 
-// ──── Override load() data source based on currentRange ────
-
-const _origLoad = load;
 async function loadRange({ refresh = false } = {}) {
-  try {
-    const params = new URLSearchParams({ key: currentRange });
-    if (refresh) params.set('_t', Date.now());
-    const res = await fetch('/api/range?' + params, { cache: 'no-store' });
-    if (!res.ok) throw new Error('http ' + res.status);
-    const d = await res.json();
-    renderRangeData(d);
-  } catch (e) {
-    console.warn('range fetch failed', e);
+  const key = currentRange;
+  // De-dupe concurrent fetches of the same key.
+  if (_rangeInflight.has(key)) {
+    try { return await _rangeInflight.get(key); }
+    catch (_) { /* fall through to a fresh attempt */ }
   }
+  const params = new URLSearchParams({ key });
+  if (refresh) params.set('refresh', '1');
+  const p = fetch('/api/range?' + params, { cache: 'no-store' })
+    .then(res => { if (!res.ok) throw new Error('http ' + res.status); return res.json(); })
+    .then(d => {
+      _rangeCache.set(key, d);
+      if (currentRange === key) renderRangeData(d);
+      return d;
+    })
+    .catch(e => { console.warn('range fetch failed', e); throw e; })
+    .finally(() => { _rangeInflight.delete(key); });
+  _rangeInflight.set(key, p);
+  return p;
 }
 
-// patch load() so range tabs route to /api/range when not "today"
-window.load = function patchedLoad(opts) {
-  if (currentRange === 'today') return _origLoad(opts);
-  return loadRange(opts);
-};
+// Prefetch common ranges in the background once the popup boots, so the very
+// first click on any tab is instant.
+function prefetchRanges() {
+  const keys = ['24h', '7d', 'week', 'month', '30d', '90d'];
+  const fire = (k) => fetch('/api/range?key=' + k, { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d) _rangeCache.set(k, d); })
+    .catch(() => {});
+  // Stagger by ~80ms each so we don't spike the local server.
+  keys.forEach((k, i) => setTimeout(() => fire(k), 80 * i));
+}
+// Kick off after the page has had a chance to render today first.
+setTimeout(prefetchRanges, 250);
+
+// Also cache the original /api/today payload for the "today" tab so swapping
+// back from another range is instant too.
+(function hookTodayCache() {
+  if (window.__suprbar_today_hook) return;
+  window.__suprbar_today_hook = true;
+  const origRender = window.render || render;
+  if (typeof origRender === 'function') {
+    window.render = function(d) {
+      _rangeCache.set('today', d);
+      return origRender(d);
+    };
+  }
+})();
 
 function renderRangeData(d) {
   const t = d.totals || {};

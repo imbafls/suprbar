@@ -59,6 +59,12 @@ _ALLOWED_KEYS: set[str] = {
 _today_cache: dict = {"data": None, "ts": 0.0}
 _TODAY_TTL = 4.0
 
+# /api/range cache — keyed by a fingerprint that includes filters so a config
+# change invalidates automatically. 30s TTL → clicking between tabs is instant
+# after the first miss for each tab.
+_range_cache: dict[str, dict] = {}
+_RANGE_TTL = 30.0
+
 # Process-level state for diagnostics/health.
 _PROCESS_STARTED = time.monotonic()
 _PROCESS_STARTED_WALL = time.time()
@@ -92,7 +98,46 @@ def today_cached() -> dict:
 def invalidate_today_cache() -> None:
     _today_cache["data"] = None
     _today_cache["ts"] = 0.0
+    _range_cache.clear()
     p_anthropic_api.invalidate_cache()
+
+
+def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> dict:
+    """Return a cached range payload or compute + cache one."""
+    cfg = config.load()
+    rng = cfg.get("range", {}) or {}
+    proj = cfg.get("projects", {}) or {}
+    fp = (
+        key,
+        custom_start or rng.get("custom_start") or "",
+        custom_end or rng.get("custom_end") or "",
+        rng.get("week_starts_on", "mon"),
+        rng.get("day_boundary", "local"),
+        bool(rng.get("rolling_24h", False)),
+        bool(rng.get("include_weekends", True)),
+        tuple(proj.get("allowlist") or []),
+        tuple(proj.get("denylist")  or []),
+        bool(proj.get("anonymize", False)),
+    )
+    cache_key = repr(fp)
+    now = _now_monotonic()
+    entry = _range_cache.get(cache_key)
+    if entry and (now - entry["ts"]) < _RANGE_TTL:
+        return entry["data"]
+    data = scanner.range_summary(
+        range_key=key,
+        custom_start=custom_start or rng.get("custom_start"),
+        custom_end=custom_end   or rng.get("custom_end"),
+        week_starts_on=rng.get("week_starts_on", "mon"),
+        day_boundary=rng.get("day_boundary", "local"),
+        rolling_24h=bool(rng.get("rolling_24h", False)),
+        allowlist=list(proj.get("allowlist") or []),
+        denylist=list(proj.get("denylist")  or []),
+        anonymize=bool(proj.get("anonymize", False)),
+        include_weekends=bool(rng.get("include_weekends", True)),
+    )
+    _range_cache[cache_key] = {"data": data, "ts": now}
+    return data
 
 
 # ---------- shutdown callback hook ----------
@@ -581,26 +626,14 @@ def _range_payload(qs: dict) -> dict:
     """Build a /api/range response using user range prefs as defaults."""
     cfg = config.load()
     rng = cfg.get("range", {})
-    proj = cfg.get("projects", {})
-    week_starts = rng.get("week_starts_on", "mon")
-    day_bound   = rng.get("day_boundary",   "local")
-    rolling     = bool(rng.get("rolling_24h", False))
-    include_we  = bool(rng.get("include_weekends", True))
-
     key = (qs.get("key") or [rng.get("default", "today")])[0]
     cs  = (qs.get("start") or [rng.get("custom_start") or ""])[0] or None
     ce  = (qs.get("end") or [rng.get("custom_end") or ""])[0] or None
-    return scanner.range_summary(
-        range_key=key,
-        custom_start=cs, custom_end=ce,
-        week_starts_on=week_starts,
-        day_boundary=day_bound,
-        rolling_24h=rolling,
-        allowlist=config.project_allowlist(),
-        denylist=config.project_denylist(),
-        anonymize=config.anonymize_projects(),
-        include_weekends=include_we,
-    )
+    if "refresh" in qs:
+        # caller is forcing a refresh; drop cached entry for this fingerprint
+        # (range_cached re-computes when entry is missing).
+        _range_cache.clear()
+    return range_cached(key, cs, ce)
 
 
 def _budgets_payload() -> dict:
