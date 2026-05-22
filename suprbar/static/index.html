@@ -36,6 +36,17 @@
         </div>
       </div>
 
+      <!-- range tabs -->
+      <div class="range-tabs" id="rangeTabs" role="tablist" aria-label="Time range">
+        <button class="rt active" role="tab" data-range="today"     data-tip="Today">Today</button>
+        <button class="rt"        role="tab" data-range="24h"       data-tip="Rolling 24 hours">24h</button>
+        <button class="rt"        role="tab" data-range="7d"        data-tip="Last 7 days">7d</button>
+        <button class="rt"        role="tab" data-range="week"      data-tip="This calendar week">Wk</button>
+        <button class="rt"        role="tab" data-range="month"     data-tip="This calendar month">Mo</button>
+        <button class="rt"        role="tab" data-range="30d"       data-tip="Last 30 days">30d</button>
+        <button class="rt"        role="tab" data-range="90d"       data-tip="Last 90 days">90d</button>
+      </div>
+
       <!-- cost block -->
       <div class="cost-block" id="costBlock">
         <div class="cost-eyebrow">
@@ -44,6 +55,13 @@
             <span class="pulse-dot"></span>
             session live
           </span>
+        </div>
+        <div class="budget-strip" id="budgetStrip" hidden>
+          <div class="bs-row">
+            <span class="bs-label">Budget</span>
+            <div class="bs-bar"><div class="bs-fill" id="bsFill" style="width:0%"></div></div>
+            <span class="bs-pct" id="bsPct">—</span>
+          </div>
         </div>
         <div class="cost" id="costNum" aria-live="polite" aria-atomic="true">
           <span class="currency">$</span><span id="costWhole">0</span><span class="cents" id="costCents">.00</span>
@@ -128,30 +146,26 @@
       <div class="settings-overlay" id="settingsOverlay" hidden>
         <div class="settings-head">
           <div class="title">Settings</div>
-          <button class="icon-btn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
+          <div class="settings-head-tools">
+            <input type="search" id="settingsSearch" class="settings-search" placeholder="Filter settings…" aria-label="Filter settings">
+            <button class="icon-btn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="settings-body">
-          <div class="settings-section">
-            <div class="settings-section-title">Sources</div>
-
+          <!-- Static API-key block (the key is stored DPAPI-encrypted; can't go
+               through the generic prefs path). -->
+          <div class="settings-section" data-section="key">
+            <div class="settings-section-title">Anthropic API Key</div>
             <div class="settings-row">
               <div class="settings-row-main">
-                <div class="lbl">Claude Code · local</div>
-                <div class="desc">Reads <span class="mono">~/.claude/projects/**/*.jsonl</span>. Always on.</div>
-              </div>
-              <button type="button" class="toggle on disabled" aria-label="Local source (always on)" aria-disabled="true" aria-pressed="true" tabindex="-1" data-tip="Required source"></button>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-row-main">
-                <div class="lbl">Anthropic API</div>
-                <div class="desc">Org-wide spend via the Admin API. Requires an admin key (<span class="mono">sk-ant-admin01-…</span>).</div>
+                <div class="lbl">Admin key</div>
+                <div class="desc">Required for org-wide API spend (<span class="mono">sk-ant-admin01-…</span>). Stored encrypted on this machine.</div>
                 <div class="input-row">
                   <input type="password" id="adminKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-ant-admin01-…" aria-label="Anthropic admin key">
                   <button class="btn-sm" id="testKeyBtn">Test</button>
@@ -159,36 +173,26 @@
                 </div>
                 <div class="status-line" id="keyStatus" aria-live="polite"></div>
               </div>
-              <button type="button" class="toggle" id="anthropicToggle" aria-label="Enable Anthropic API source" aria-pressed="false"></button>
             </div>
           </div>
 
-          <div class="settings-section">
-            <div class="settings-section-title">Preferences</div>
+          <!-- Dynamically rendered sections from /api/prefs + /api/prefs/schema -->
+          <div id="settingsSections"></div>
 
-            <div class="settings-row">
-              <div class="settings-row-main">
-                <div class="lbl">Pin popup (don't auto-hide)</div>
-                <div class="desc">Stay open when focus moves elsewhere.</div>
-              </div>
-              <button type="button" class="toggle" id="pinnedToggle" aria-label="Pin popup" aria-pressed="false"></button>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-row-main">
-                <div class="lbl">Start on Windows sign-in</div>
-                <div class="desc">Launch supr.bar automatically when you log in.</div>
-              </div>
-              <button type="button" class="toggle" id="startupToggle" aria-label="Start on Windows sign-in" aria-pressed="false"></button>
-            </div>
+          <!-- Bottom action row -->
+          <div class="settings-actions">
+            <button class="btn-sm" id="exportConfigBtn" data-tip="Download a config snapshot">Export config</button>
+            <button class="btn-sm" id="importConfigBtn" data-tip="Restore from a snapshot">Import</button>
+            <button class="btn-sm danger" id="resetConfigBtn" data-tip="Restore all defaults (keeps API key)">Reset</button>
+            <input type="file" id="importFileInput" accept="application/json" hidden>
           </div>
 
-          <div class="settings-section">
+          <div class="settings-section about">
             <div class="settings-section-title">About</div>
             <div class="settings-row">
               <div class="settings-row-main">
-                <div class="lbl">supr.bar v0.1</div>
-                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">Alt+Q</span> quit · <span class="mono">?</span> all shortcuts</div>
+                <div class="lbl">supr.bar <span id="aboutVersion">v0.2</span></div>
+                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">Alt+Q</span> quit · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> all shortcuts</div>
               </div>
             </div>
           </div>

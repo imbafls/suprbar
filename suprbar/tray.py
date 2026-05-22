@@ -29,11 +29,16 @@ PULSE_MS = 300
 
 # ---------- Icon drawing ----------
 
-def _gradient_image(size: int) -> Image.Image:
-    """Diagonal accent->violet gradient. Generated once at high resolution."""
+def _gradient_image(size: int, palette: str = "default") -> Image.Image:
+    """Diagonal gradient. Palette accents vary: default = accent→violet,
+    warn = orange, danger = red."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    a = (91, 141, 239)   # --b-accent
-    v = (140, 91, 239)   # --b-violet
+    if palette == "warn":
+        a, v = (251, 191, 36), (245, 158, 11)    # amber → orange
+    elif palette == "danger":
+        a, v = (248, 113, 113), (220, 38, 38)    # red gradient
+    else:
+        a, v = (91, 141, 239), (140, 91, 239)    # accent → violet
     px = img.load()
     denom = 2 * (size - 1) if size > 1 else 1
     for y in range(size):
@@ -127,11 +132,13 @@ def _brighten(img: Image.Image, factor: float = 1.18) -> Image.Image:
     return img
 
 
-def _render(live: bool = False, brighter: bool = False) -> Image.Image:
-    """Render a tray icon (256→64 px LANCZOS) with optional live + bright."""
+def _render(live: bool = False, brighter: bool = False,
+            palette: str = "default") -> Image.Image:
+    """Render a tray icon (256→64 px LANCZOS) with optional live + bright +
+    color palette (default / warn / danger for budget alerts)."""
     big_size = 256
     target_size = 64
-    bg = _gradient_image(big_size)
+    bg = _gradient_image(big_size, palette=palette)
     bg = _draw_S(bg)
     if live:
         bg = _add_live_dot(bg)
@@ -223,6 +230,7 @@ class TrayApp:
         self._idle_bright = _render(live=False, brighter=True)
         self._live_bright = _render(live=True, brighter=True)
         self._pulse_timer: threading.Timer | None = None
+        self._last_icon_key: tuple = (False, "default")
 
     # ---- click / menu callbacks ----
 
@@ -338,14 +346,61 @@ class TrayApp:
         self._pulse_timer.start()
 
     def _apply_live_state(self, data: dict) -> None:
-        """Swap the tray icon to the live/idle variant when state changes."""
+        """Swap the tray icon based on (live, budget_alert).
+
+        The icon picks a palette: default for normal, warn (amber) when any
+        budget is approaching its limit, danger (red) when over. The choice
+        is only honored if the user enabled budget-aware tinting.
+        """
         live = bool(data.get("active"))
-        if live != self._last_live and self._icon:
+        palette = "default"
+        try:
+            if config.get_pref("budgets.tray_warn_color", True):
+                budgets = self._latest_budgets()
+                if budgets:
+                    over = any(b.get("over") for b in budgets.values()
+                               if isinstance(b, dict))
+                    alert = any(b.get("alerting") for b in budgets.values()
+                                if isinstance(b, dict))
+                    if over:
+                        palette = "danger"
+                    elif alert:
+                        palette = "warn"
+        except Exception:
+            pass
+        key = (live, palette)
+        if (key != self._last_icon_key) and self._icon:
             try:
-                self._icon.icon = self._live_icon if live else self._idle_icon
+                self._icon.icon = _render(live=live, palette=palette)
             except Exception:
                 pass
         self._last_live = live
+        self._last_icon_key = key
+
+    def _latest_budgets(self) -> dict | None:
+        """Compute current budget windows once per tooltip refresh.
+
+        Uses the scanner directly to avoid an HTTP loop back to ourselves.
+        """
+        try:
+            from . import scanner as _scn
+            cfg = config.load()
+            b = cfg.get("budgets", {}) or {}
+            d = float(b.get("daily_limit",   0.0) or 0.0)
+            w = float(b.get("weekly_limit",  0.0) or 0.0)
+            m = float(b.get("monthly_limit", 0.0) or 0.0)
+            if not (d or w or m):
+                return None
+            week_starts = cfg.get("range", {}).get("week_starts_on", "mon")
+            alert_pct = int(b.get("alert_at_pct", 80) or 80)
+            s = _scn.budgets_summary(d, w, m, week_starts_on=week_starts,
+                                     allowlist=config.project_allowlist(),
+                                     denylist=config.project_denylist())
+            for k in ("daily", "weekly", "monthly"):
+                s[k]["alerting"] = s[k]["limit"] > 0 and s[k]["pct"] >= alert_pct
+            return s
+        except Exception:
+            return None
 
     def _update_tooltip(self):
         try:

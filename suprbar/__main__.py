@@ -20,8 +20,19 @@ DEFAULT_PORT = 47821
 
 
 def setup_logging() -> None:
-    level_name = os.environ.get("SUPRBAR_LOG", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
+    # Env var wins (debug/dev); otherwise fall back to data.log_level pref.
+    level_name = os.environ.get("SUPRBAR_LOG", "").upper()
+    if not level_name:
+        try:
+            level_name = str(config.get_pref("data.log_level", "INFO")).upper()
+        except Exception:
+            level_name = "INFO"
+    if level_name == "OFF":
+        level = logging.CRITICAL + 10  # effectively silent
+    elif level_name == "WARN":
+        level = logging.WARNING
+    else:
+        level = getattr(logging, level_name, logging.INFO)
 
     fmt = logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s: %(message)s",

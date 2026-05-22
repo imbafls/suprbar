@@ -41,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, aggregator, config
+from . import __version__, aggregator, config, scanner
 from .providers import anthropic_api as p_anthropic_api
 
 log = logging.getLogger("suprbar.server")
@@ -265,6 +265,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/window-state":
             return self._send_json(200, config.load_window_state())
 
+        if path == "/api/range":
+            try:
+                return self._send_json(200, _range_payload(qs))
+            except Exception as e:  # noqa: BLE001
+                return self._send_error(500, "range_failed", str(e))
+
+        if path == "/api/budgets":
+            try:
+                return self._send_json(200, _budgets_payload())
+            except Exception as e:  # noqa: BLE001
+                return self._send_error(500, "budgets_failed", str(e))
+
+        if path == "/api/prefs":
+            # Return the full mutable preference tree (excluding secrets).
+            return self._send_json(200, _prefs_payload())
+
+        if path == "/api/prefs/schema":
+            return self._send_json(200, _prefs_schema_payload())
+
         return self._send_error(404, "not_found", f"no route {path}")
 
     def do_POST(self):
@@ -307,6 +326,21 @@ class Handler(BaseHTTPRequestHandler):
             config.reset(reset_key=reset_key)
             invalidate_today_cache()
             return self._send_json(200, _public_config())
+
+        if path == "/api/prefs":
+            body = self._read_json_body()
+            if not isinstance(body, dict):
+                return self._send_error(400, "bad_body", "JSON object required")
+            updates = body.get("updates") if "updates" in body else body
+            if not isinstance(updates, dict):
+                return self._send_error(400, "bad_body", "updates must be a dict")
+            try:
+                applied = config.set_many(updates)
+            except ValueError as e:
+                return self._send_error(400, "invalid_value", str(e))
+            invalidate_today_cache()
+            return self._send_json(200, {"applied": applied,
+                                          "prefs": _prefs_payload()["prefs"]})
 
         if path == "/api/window-state":
             body = self._read_json_body()
@@ -542,6 +576,80 @@ def _apply_config_patch(body: dict) -> None:
 
 
 # ---------- path opener (sandboxed to home dir) ----------
+
+def _range_payload(qs: dict) -> dict:
+    """Build a /api/range response using user range prefs as defaults."""
+    cfg = config.load()
+    rng = cfg.get("range", {})
+    proj = cfg.get("projects", {})
+    week_starts = rng.get("week_starts_on", "mon")
+    day_bound   = rng.get("day_boundary",   "local")
+    rolling     = bool(rng.get("rolling_24h", False))
+    include_we  = bool(rng.get("include_weekends", True))
+
+    key = (qs.get("key") or [rng.get("default", "today")])[0]
+    cs  = (qs.get("start") or [rng.get("custom_start") or ""])[0] or None
+    ce  = (qs.get("end") or [rng.get("custom_end") or ""])[0] or None
+    return scanner.range_summary(
+        range_key=key,
+        custom_start=cs, custom_end=ce,
+        week_starts_on=week_starts,
+        day_boundary=day_bound,
+        rolling_24h=rolling,
+        allowlist=config.project_allowlist(),
+        denylist=config.project_denylist(),
+        anonymize=config.anonymize_projects(),
+        include_weekends=include_we,
+    )
+
+
+def _budgets_payload() -> dict:
+    """Build a /api/budgets response using user budget prefs."""
+    cfg = config.load()
+    b = cfg.get("budgets", {}) or {}
+    daily   = float(b.get("daily_limit",   0.0) or 0.0)
+    weekly  = float(b.get("weekly_limit",  0.0) or 0.0)
+    monthly = float(b.get("monthly_limit", 0.0) or 0.0)
+    alert_pct = int(b.get("alert_at_pct", 80) or 80)
+    week_starts = cfg.get("range", {}).get("week_starts_on", "mon")
+    s = scanner.budgets_summary(
+        daily, weekly, monthly,
+        week_starts_on=week_starts,
+        allowlist=config.project_allowlist(),
+        denylist=config.project_denylist(),
+    )
+    # add alert flags
+    for window in ("daily", "weekly", "monthly"):
+        s[window]["alerting"] = s[window]["limit"] > 0 and s[window]["pct"] >= alert_pct
+    s["alert_pct"] = alert_pct
+    return s
+
+
+def _prefs_payload() -> dict:
+    """Return mutable preferences (no admin key plaintext)."""
+    cfg = config.load()
+    public = json.loads(json.dumps(cfg))
+    # never expose the encrypted blob
+    if "sources" in public and "anthropic_api" in public["sources"]:
+        public["sources"]["anthropic_api"].pop("admin_key_enc", None)
+        public["sources"]["anthropic_api"]["has_key"] = config.has_admin_key()
+    return {"prefs": public, "schema_version": cfg.get("schema_version", 1)}
+
+
+def _prefs_schema_payload() -> dict:
+    """Return the SCHEMA dict in a form the UI can render generically."""
+    out = []
+    for path, (typ, arg) in config.SCHEMA.items():
+        entry: dict = {"path": path, "type": typ}
+        if typ == "enum":
+            entry["options"] = list(arg)
+        elif typ in ("int", "float") and arg is not None:
+            entry["min"], entry["max"] = arg
+        # default value pulled from current config (which is defaults-merged)
+        entry["default"] = config.get_pref(path)
+        out.append(entry)
+    return {"settings": out}
+
 
 def _open_path(target: str) -> bool:
     if not target:

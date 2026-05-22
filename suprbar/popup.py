@@ -493,9 +493,22 @@ class TrayBridge:
                 # Don't auto-hide if user has pinned the popup.
                 if config.is_pinned():
                     return
+                # User can also disable auto-hide-on-blur entirely.
+                if not config.auto_hide_enabled():
+                    return
                 # Ignore blur-driven hide if the window just opened — the
                 # focus is still settling.
                 if time.monotonic() - self._show_settle_ts < self._settle_seconds:
+                    return
+                # Optional user-tunable delay before hiding.
+                try:
+                    delay_ms = int(config.get_pref("behavior.auto_hide_delay_ms", 0))
+                except Exception:
+                    delay_ms = 0
+                if delay_ms > 0:
+                    import threading
+                    threading.Timer(delay_ms / 1000.0,
+                                    lambda: self.hide(from_blur=False)).start()
                     return
             try:
                 self._window.hide()
@@ -590,6 +603,16 @@ class JsApi:
 # ---------- Window creation ----------
 
 def build_window(url: str, bridge: TrayBridge) -> webview.Window:
+    global WIN_W, WIN_H  # noqa: PLW0603
+    # Resolve user prefs for window sizing / placement.
+    try:
+        from . import config as _cfg
+        w_pref = int(_cfg.get_pref("window.width",  WIN_W) or WIN_W)
+        h_pref = int(_cfg.get_pref("window.height", WIN_H) or WIN_H)
+        on_top = bool(_cfg.always_on_top())
+    except Exception:
+        w_pref, h_pref, on_top = WIN_W, WIN_H, True
+    WIN_W, WIN_H = w_pref, h_pref
     x, y = bridge._resolve_show_xy()
     w = webview.create_window(
         title="supr.bar",
@@ -599,10 +622,10 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         x=x,
         y=y,
         frameless=True,
-        easy_drag=False,         # we use CSS -webkit-app-region: drag instead
+        easy_drag=False,
         resizable=False,
-        on_top=True,
-        hidden=True,              # tray click reveals it
+        on_top=on_top,
+        hidden=True,
         background_color="#0d1018",
         minimized=False,
         js_api=JsApi(bridge),

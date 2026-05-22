@@ -787,4 +787,609 @@ setInterval(updateStartedDisplay, 1000);
 // Expose a tiny debug surface — useful in DevTools.
 window.suprbar = { load, loadConfig, toast, exportTodayCSV };
 
+// ════════════════════════════════════════════════════════════════════════
+//  Range tabs + budgets + dynamic settings (50+ prefs)
+// ════════════════════════════════════════════════════════════════════════
+
+let prefsCache = null;
+let schemaCache = null;
+let currentRange = 'today';
+
+const SECTION_TITLES = {
+  range:    'Time range',
+  display:  'Display',
+  budgets:  'Budgets & alerts',
+  behavior: 'Behavior',
+  projects: 'Projects',
+  sources:  'Sources',
+  keyboard: 'Keyboard',
+  data:     'Data & privacy',
+  window:   'Window',
+  ui:       'Legacy UI',
+};
+
+const SECTION_ORDER = ['range','display','budgets','behavior','projects',
+                       'sources','keyboard','data','window'];
+
+const LABELS = {
+  // range
+  'range.default':          { label: 'Default range',         desc: 'Time range applied when popup opens.' },
+  'range.custom_start':     { label: 'Custom start date',     desc: 'Used when range is "custom".' },
+  'range.custom_end':       { label: 'Custom end date',       desc: 'Used when range is "custom".' },
+  'range.week_starts_on':   { label: 'Week starts on',        desc: 'Affects the "Wk" range tab.' },
+  'range.day_boundary':     { label: 'Day boundary',          desc: 'Compute "today" by local time or UTC.' },
+  'range.rolling_24h':      { label: 'Rolling 24h "today"',   desc: 'Use last 24 hours instead of calendar day.' },
+  'range.include_weekends': { label: 'Include weekends',      desc: 'Uncheck to exclude Sat/Sun from totals.' },
+  'range.compare_previous': { label: 'Compare to previous',   desc: 'Show delta vs prior period (planned).' },
+  // display
+  'display.theme':          { label: 'Theme',                 desc: 'Dark, light, or follow OS.' },
+  'display.accent':         { label: 'Accent color',          desc: 'Tints highlights and pin.' },
+  'display.density':        { label: 'Density',               desc: 'Compact, normal, or spacious padding.' },
+  'display.font_scale':     { label: 'Font scale',            desc: '0.85× to 1.25× the base size.' },
+  'display.currency':       { label: 'Currency symbol',       desc: 'Cosmetic — does not convert (USD only).' },
+  'display.cost_format':    { label: 'Cost format',           desc: 'Show cents or round to whole dollars.' },
+  'display.token_format':   { label: 'Token format',          desc: '"1.2k" compact or "1,234" full.' },
+  'display.locale':         { label: 'Number locale',         desc: 'BCP-47 tag (e.g. en-US, de-DE).' },
+  'display.show_token_bar':     { label: 'Show token mix bar',     desc: 'Input / output / cache ratio bar.' },
+  'display.show_cache_info':    { label: 'Show cache info',        desc: 'Cache-hit % + cache token count.' },
+  'display.show_burn_rate':     { label: 'Show burn rate',         desc: 'Live $/hour for the active session.' },
+  'display.show_model':         { label: 'Show model name',        desc: 'Current model in the metric trio.' },
+  'display.show_project':       { label: 'Show project name',      desc: 'Project shown in the footer.' },
+  'display.show_sessions_today': { label: 'Show session count',    desc: 'Distinct sessions today.' },
+  'display.animations':         { label: 'Animations',             desc: 'Disable for reduced motion.' },
+  // budgets
+  'budgets.daily_limit':    { label: 'Daily limit ($)',       desc: 'Per-day cap. 0 = no limit.' },
+  'budgets.weekly_limit':   { label: 'Weekly limit ($)',      desc: 'Per-week cap. 0 = no limit.' },
+  'budgets.monthly_limit':  { label: 'Monthly limit ($)',     desc: 'Per-month cap. 0 = no limit.' },
+  'budgets.alert_at_pct':   { label: 'Alert threshold (%)',   desc: 'Warn when % of any limit is reached.' },
+  'budgets.notify':         { label: 'Toast on warning',      desc: 'Show in-popup notification.' },
+  'budgets.tray_warn_color': { label: 'Tint tray icon',       desc: 'Tray icon turns red when over budget.' },
+  'budgets.audio_alert':    { label: 'Audio alert',           desc: 'System sound on budget exceeded.' },
+  'budgets.quiet_hours':    { label: 'Quiet hours',           desc: 'Suppress alerts during a time window.' },
+  'budgets.quiet_start':    { label: 'Quiet start hour',      desc: '0-23, used when quiet_hours = custom.' },
+  'budgets.quiet_end':      { label: 'Quiet end hour',        desc: '0-23, used when quiet_hours = custom.' },
+  // behavior
+  'behavior.refresh_seconds':      { label: 'Refresh interval',      desc: 'Seconds between auto-refreshes. 0 = manual only.' },
+  'behavior.auto_hide':            { label: 'Auto-hide on blur',     desc: 'Hide popup when focus moves away.' },
+  'behavior.auto_hide_delay_ms':   { label: 'Auto-hide delay (ms)',  desc: 'Grace period before hiding.' },
+  'behavior.always_on_top':        { label: 'Always on top',         desc: 'Popup stays above other windows.' },
+  'behavior.show_in_taskbar':      { label: 'Show in taskbar',       desc: 'Add a taskbar entry while open.' },
+  'behavior.live_threshold_seconds': { label: 'Live session window', desc: 'Sessions touched in last N seconds are "live".' },
+  'behavior.start_minimized':      { label: 'Start minimized',       desc: 'Boot to tray-only (no popup).' },
+  'behavior.confirm_quit':         { label: 'Confirm before quit',   desc: 'Prompt before Alt+Q closes the app.' },
+  'behavior.click_through':        { label: 'Click-through mode',    desc: 'Popup ignores mouse clicks (header still draggable).' },
+  'behavior.single_instance':      { label: 'Single instance',       desc: 'Prevent multiple suprbar processes.' },
+  'behavior.open_dashboard_on_click': { label: 'Left-click opens',   desc: 'Tray left-click toggles popup.' },
+  // projects
+  'projects.allowlist':     { label: 'Allowlist',             desc: 'Comma-separated. If non-empty, only these are shown.' },
+  'projects.denylist':      { label: 'Denylist',              desc: 'Always hidden. Useful for personal/secret repos.' },
+  'projects.anonymize':     { label: 'Anonymize names',       desc: 'Replace with "project-1/2/3" in UI.' },
+  'projects.top_n':         { label: 'Top N',                 desc: 'Number of projects in the "Top projects" list.' },
+  // keyboard
+  'keyboard.enable_global':    { label: 'Global hotkeys',     desc: 'OS-wide shortcuts (planned).' },
+  'keyboard.hotkey_toggle':    { label: 'Show / hide hotkey', desc: 'e.g. Ctrl+Alt+S.' },
+  'keyboard.hotkey_refresh':   { label: 'Refresh hotkey',     desc: 'In-popup refresh key.' },
+  'keyboard.hotkey_settings':  { label: 'Settings hotkey',    desc: 'Opens this panel.' },
+  'keyboard.hotkey_quit':      { label: 'Quit hotkey',        desc: 'Closes the app.' },
+  'keyboard.hotkey_export':    { label: 'Export CSV hotkey',  desc: 'Saves today as CSV.' },
+  'keyboard.hotkey_copy_cost': { label: 'Copy cost hotkey',   desc: 'Copies "$X.XX" to clipboard.' },
+  'keyboard.vim_keys':         { label: 'Vim-style navigation', desc: 'j / k navigation in lists.' },
+  // data
+  'data.log_level':          { label: 'Log level',            desc: 'Verbosity of suprbar.log.' },
+  'data.log_retention_days': { label: 'Log retention (days)', desc: 'How long to keep log files.' },
+  'data.anonymize_logs':     { label: 'Anonymize project names in logs', desc: 'Replace project paths with hashes.' },
+  'data.cache_ttl_seconds':  { label: 'API cache TTL (s)',    desc: 'How long /api/today caches between requests.' },
+  'data.telemetry':          { label: 'Anonymous telemetry',  desc: 'Currently a no-op. Reserved.' },
+  // window
+  'window.anchor':            { label: 'Default anchor',      desc: 'Corner the popup snaps to on first launch.' },
+  'window.margin_px':         { label: 'Edge margin (px)',    desc: 'Gap between popup and screen edge.' },
+  'window.preferred_monitor': { label: 'Preferred monitor',   desc: '0 = monitor with cursor.' },
+  'window.remember_position': { label: 'Remember position',   desc: 'Save where you drag it.' },
+  'window.width':             { label: 'Width (px)',          desc: 'Popup width.' },
+  'window.height':            { label: 'Height (px)',         desc: 'Popup height.' },
+  'window.opacity':           { label: 'Opacity',             desc: 'Window transparency (0.5–1.0).' },
+  // sources
+  'sources.local.enabled':              { label: 'Local source',            desc: 'Reads ~/.claude/projects/**/*.jsonl.' },
+  'sources.anthropic_api.enabled':      { label: 'Anthropic API source',    desc: 'Org-wide spend via Admin API. Requires key above.' },
+  'sources.anthropic_api.poll_seconds': { label: 'Admin API poll (s)',      desc: 'How often to query the Admin API.' },
+  'sources.cost_mode':                  { label: 'Cost mode',                desc: 'equivalent = JSONL-derived, actual_api = API only, both = sum.' },
+  // ui
+  'ui.pinned':         { label: 'Pinned',           desc: 'Popup does not auto-hide.' },
+  'ui.start_on_login': { label: 'Start on Windows sign-in', desc: 'Auto-launch when you log in.' },
+};
+
+// ──── Range tab handlers ────
+
+function setRange(key) {
+  if (!key) return;
+  currentRange = key;
+  document.querySelectorAll('.range-tabs .rt').forEach(b => {
+    b.classList.toggle('active', b.dataset.range === key);
+  });
+  load({ refresh: true });
+}
+
+document.querySelectorAll('.range-tabs .rt').forEach(btn => {
+  btn.addEventListener('click', () => setRange(btn.dataset.range));
+});
+
+// ──── Override load() data source based on currentRange ────
+
+const _origLoad = load;
+async function loadRange({ refresh = false } = {}) {
+  try {
+    const params = new URLSearchParams({ key: currentRange });
+    if (refresh) params.set('_t', Date.now());
+    const res = await fetch('/api/range?' + params, { cache: 'no-store' });
+    if (!res.ok) throw new Error('http ' + res.status);
+    const d = await res.json();
+    renderRangeData(d);
+  } catch (e) {
+    console.warn('range fetch failed', e);
+  }
+}
+
+// patch load() so range tabs route to /api/range when not "today"
+window.load = function patchedLoad(opts) {
+  if (currentRange === 'today') return _origLoad(opts);
+  return loadRange(opts);
+};
+
+function renderRangeData(d) {
+  const t = d.totals || {};
+  // cost number
+  const newCost = Number(t.cost || 0);
+  if (window.lastCost !== undefined && Math.abs(newCost - window.lastCost) > 0.001) {
+    if (typeof animateCostTo === 'function') animateCostTo(newCost);
+  }
+  const wEl = document.getElementById('costWhole');
+  const cEl = document.getElementById('costCents');
+  const whole = Math.floor(newCost);
+  const cents = (newCost - whole).toFixed(2).slice(1);
+  if (wEl) wEl.textContent = whole.toLocaleString();
+  if (cEl) cEl.textContent = cents;
+
+  document.getElementById('costNum')?.classList.toggle('idle', newCost === 0);
+
+  // label
+  const lbl = document.getElementById('costLabel');
+  if (lbl) lbl.textContent = (d.range?.label ? d.range.label[0].toUpperCase() + d.range.label.slice(1) : currentRange) + ' · Claude Code';
+
+  // hide live indicator, hide active metric row, show summary metrics in its place
+  const live = document.getElementById('liveIndicator');
+  if (live) { live.hidden = false; live.classList.add('dim'); live.textContent = `${t.sessions} sess · ${t.projects} proj`; }
+
+  const metricRow = document.getElementById('metricRow');
+  if (metricRow) {
+    metricRow.hidden = false;
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    set('mMessages', (t.messages || 0).toLocaleString());
+    set('mModel', d.by_model?.[0]?.model ? d.by_model[0].model.replace(/^claude-/, '') : '—');
+    set('mStarted', (d.range?.days || 1) + 'd');
+    const burn = document.getElementById('mBurn');
+    if (burn) burn.textContent = '—';
+  }
+  document.getElementById('emptyState') && (document.getElementById('emptyState').hidden = true);
+
+  // token bar
+  const total = (t.input||0) + (t.output||0) + (t.cache_5m||0) + (t.cache_1h||0) + (t.cache_read||0);
+  const cacheT = (t.cache_5m||0) + (t.cache_1h||0) + (t.cache_read||0);
+  const setW = (id, n) => { const e = document.getElementById(id); if (e) e.style.width = (total > 0 ? n/total*100 : 0).toFixed(2) + '%'; };
+  setW('tbIn', t.input||0);
+  setW('tbOut', t.output||0);
+  setW('tbCache', cacheT);
+  const setT = (id, n) => { const e = document.getElementById(id); if (e) e.textContent = (typeof fmtTokens === 'function') ? fmtTokens(n) : n; };
+  setT('legIn', t.input||0); setT('legOut', t.output||0); setT('legCache', cacheT);
+
+  // cache-hit indicator
+  const chitEl = document.getElementById('cacheHit');
+  if (chitEl) chitEl.textContent = total > 0 ? `${Math.round((t.cache_hit_ratio||0)*100)}%` : '—';
+
+  // footer
+  const footMeta = document.getElementById('footMeta');
+  if (footMeta) footMeta.textContent = `${d.files_scanned||0} files · ${d.scan_ms||0}ms · ${d.range?.label||currentRange}`;
+
+  // projects list
+  const list = document.getElementById('projectsListItems');
+  if (list && Array.isArray(d.by_project)) {
+    list.innerHTML = d.by_project.slice(0, 10).map(p => `
+      <li><span class="name">${escape(p.project)}</span>
+          <span class="val">$${p.cost.toFixed(2)} · ${p.messages} msgs</span></li>
+    `).join('');
+  }
+}
+
+// ──── Budgets polling + UI ────
+
+async function loadBudgets() {
+  try {
+    const r = await fetch('/api/budgets', { cache: 'no-store' });
+    if (!r.ok) return;
+    const b = await r.json();
+    renderBudget(b);
+    return b;
+  } catch (e) { /* swallow */ }
+}
+
+function renderBudget(b) {
+  // Show the bar for the most-relevant window: daily if set, else weekly, else monthly
+  const order = ['daily','weekly','monthly'];
+  let active = null;
+  for (const k of order) {
+    if (b[k]?.limit > 0) { active = { key: k, ...b[k] }; break; }
+  }
+  const strip = document.getElementById('budgetStrip');
+  if (!strip) return;
+  if (!active) { strip.hidden = true; return; }
+  strip.hidden = false;
+  const fill = document.getElementById('bsFill');
+  const pct  = document.getElementById('bsPct');
+  if (!fill || !pct) return;
+  const pctVal = Math.min(100, Math.max(0, active.pct));
+  fill.style.width = pctVal.toFixed(1) + '%';
+  fill.classList.remove('warn', 'over');
+  if (active.pct >= 100) fill.classList.add('over');
+  else if (active.alerting) fill.classList.add('warn');
+  pct.textContent = active.pct >= 1000 ? '>999%' : active.pct.toFixed(0) + '%';
+  pct.title = `${active.key}: $${active.spent.toFixed(2)} / $${active.limit.toFixed(2)}`;
+}
+
+setInterval(loadBudgets, 30_000);
+loadBudgets();
+
+// ──── Apply display prefs to the DOM ────
+
+function applyDisplayPrefs(prefs) {
+  if (!prefs) return;
+  const d = prefs.display || {};
+  const b = prefs.behavior || {};
+  const body = document.body;
+
+  // theme
+  body.dataset.theme = (d.theme === 'light') ? 'light' :
+                       (d.theme === 'auto')  ? (matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+                                             : '';
+  // accent
+  body.dataset.accent = d.accent || 'violet';
+  // density
+  body.classList.toggle('compact',  d.density === 'compact');
+  body.classList.toggle('spacious', d.density === 'spacious');
+  // font scale
+  body.style.setProperty('--font-scale', String(d.font_scale || 1));
+  // animations
+  body.classList.toggle('no-animations', d.animations === false);
+  // click-through
+  body.classList.toggle('click-through', b.click_through === true);
+
+  // visibility of each metric tile / chip
+  const setHidden = (sel, hide) => document.querySelectorAll(sel).forEach(e => e.hidden = !!hide);
+  setHidden('.token-bar, .token-legend', d.show_token_bar === false);
+  setHidden('#cacheHit', d.show_cache_info === false);
+  setHidden('#mBurnCell, #mBurn', d.show_burn_rate === false);
+
+  // refresh interval
+  const refresh = Math.max(0, Number(b.refresh_seconds ?? 5));
+  if (typeof setPollInterval === 'function') {
+    if (refresh === 0) setPollInterval(0);  // manual
+    else setPollInterval(refresh * 1000);
+  }
+}
+
+// ──── Settings: schema + prefs load ────
+
+async function loadPrefs(force = false) {
+  if (prefsCache && !force) return prefsCache;
+  const [a, b] = await Promise.all([
+    fetch('/api/prefs').then(r => r.json()),
+    fetch('/api/prefs/schema').then(r => r.json()),
+  ]);
+  prefsCache  = a.prefs;
+  schemaCache = b.settings;
+  applyDisplayPrefs(prefsCache);
+  return prefsCache;
+}
+
+// ──── Settings: render dynamic sections ────
+
+function getNested(obj, path) {
+  let cur = obj;
+  for (const p of path.split('.')) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+function buildControl(setting, value) {
+  const ctl = document.createElement('div');
+  ctl.className = 'ctl-wrap';
+  const path = setting.path;
+
+  const commit = (val) => {
+    fetch('/api/prefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates: { [path]: val } }),
+    }).then(r => r.json()).then(d => {
+      if (d.error) {
+        if (typeof toast === 'function') toast(d.error.message || 'invalid', 'err');
+        return;
+      }
+      prefsCache = d.prefs;
+      applyDisplayPrefs(prefsCache);
+      // refresh data when range or filter prefs change
+      if (path.startsWith('range.') || path.startsWith('projects.')) {
+        load({ refresh: true });
+        loadBudgets();
+      }
+      if (path.startsWith('budgets.')) loadBudgets();
+      if (typeof toast === 'function') toast('saved', 'ok', 900);
+    });
+  };
+
+  if (setting.type === 'bool') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toggle' + (value ? ' on' : '');
+    btn.setAttribute('aria-pressed', value ? 'true' : 'false');
+    btn.setAttribute('aria-label', LABELS[path]?.label || path);
+    btn.addEventListener('click', () => {
+      const next = !btn.classList.contains('on');
+      btn.classList.toggle('on', next);
+      btn.setAttribute('aria-pressed', next);
+      commit(next);
+    });
+    ctl.appendChild(btn);
+  } else if (setting.type === 'enum') {
+    // For accent specifically, use color swatches; otherwise dropdown
+    if (path === 'display.accent') {
+      const wrap = document.createElement('div');
+      wrap.className = 'accent-swatches';
+      setting.options.forEach(opt => {
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'sw' + (opt === value ? ' on' : '');
+        sw.dataset.v = opt;
+        sw.title = opt;
+        sw.setAttribute('aria-label', 'Accent ' + opt);
+        sw.addEventListener('click', () => {
+          wrap.querySelectorAll('.sw').forEach(x => x.classList.remove('on'));
+          sw.classList.add('on');
+          commit(opt);
+        });
+        wrap.appendChild(sw);
+      });
+      ctl.appendChild(wrap);
+    } else {
+      const sel = document.createElement('select');
+      sel.className = 'input-fld';
+      setting.options.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = String(opt); o.textContent = String(opt);
+        if (String(opt) === String(value)) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('change', () => commit(sel.value));
+      ctl.appendChild(sel);
+    }
+  } else if (setting.type === 'int' || setting.type === 'float') {
+    const lo = setting.min, hi = setting.max;
+    const useRange = setting.type === 'float'
+      || (lo != null && hi != null && (hi - lo) <= 100);
+    const input = document.createElement('input');
+    input.className = 'input-fld';
+    if (useRange && lo != null && hi != null) {
+      input.type = 'range';
+      input.min = lo; input.max = hi;
+      input.step = setting.type === 'float' ? 0.05 : 1;
+    } else {
+      input.type = 'number';
+      if (lo != null) input.min = lo;
+      if (hi != null) input.max = hi;
+    }
+    input.value = (value == null) ? '' : String(value);
+    const label = document.createElement('span');
+    label.className = 'ctl-range-val';
+    label.textContent = setting.type === 'float'
+      ? Number(value).toFixed(2)
+      : String(value ?? '');
+    input.addEventListener('input', () => {
+      label.textContent = setting.type === 'float'
+        ? Number(input.value).toFixed(2)
+        : input.value;
+    });
+    input.addEventListener('change', () => {
+      const v = setting.type === 'float' ? parseFloat(input.value) : parseInt(input.value, 10);
+      commit(v);
+    });
+    ctl.appendChild(input);
+    if (useRange) ctl.appendChild(label);
+  } else if (setting.type === 'str') {
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'input-fld';
+    input.value = value || '';
+    input.placeholder = '';
+    input.addEventListener('change', () => commit(input.value));
+    ctl.appendChild(input);
+  } else if (setting.type === 'date_or_null') {
+    const input = document.createElement('input');
+    input.type = 'date'; input.className = 'input-fld';
+    if (value) input.value = value;
+    input.addEventListener('change', () => commit(input.value || null));
+    ctl.appendChild(input);
+  } else if (setting.type === 'list_str') {
+    const arr = Array.isArray(value) ? [...value] : [];
+    const wrap = document.createElement('div');
+    wrap.className = 'taginput';
+    const render = () => {
+      wrap.innerHTML = '';
+      arr.forEach((tag, i) => {
+        const t = document.createElement('span');
+        t.className = 'tag';
+        t.innerHTML = `${escape(tag)}<span class="x" data-i="${i}" role="button" aria-label="Remove">×</span>`;
+        wrap.appendChild(t);
+      });
+      const inp = document.createElement('input');
+      inp.placeholder = 'add… (Enter)';
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && inp.value.trim()) {
+          arr.push(inp.value.trim());
+          commit([...arr]); render();
+        } else if (e.key === 'Backspace' && !inp.value && arr.length) {
+          arr.pop(); commit([...arr]); render();
+        }
+      });
+      wrap.appendChild(inp);
+      wrap.querySelectorAll('.x').forEach(x => {
+        x.addEventListener('click', () => {
+          arr.splice(parseInt(x.dataset.i, 10), 1);
+          commit([...arr]); render();
+        });
+      });
+    };
+    render();
+    ctl.appendChild(wrap);
+  } else {
+    const span = document.createElement('span');
+    span.textContent = JSON.stringify(value);
+    span.style.cssText = 'font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.6)';
+    ctl.appendChild(span);
+  }
+  return ctl;
+}
+
+function renderSettings() {
+  const host = document.getElementById('settingsSections');
+  if (!host) return;
+  host.innerHTML = '';
+
+  // group schema entries by section
+  const bySection = {};
+  for (const s of schemaCache) {
+    const section = s.path.split('.')[0];
+    (bySection[section] ||= []).push(s);
+  }
+
+  for (const section of SECTION_ORDER) {
+    const items = bySection[section];
+    if (!items || items.length === 0) continue;
+    const sec = document.createElement('div');
+    sec.className = 'settings-section';
+    sec.dataset.section = section;
+
+    const title = document.createElement('div');
+    title.className = 'settings-section-title';
+    title.textContent = SECTION_TITLES[section] || section;
+    sec.appendChild(title);
+
+    for (const setting of items) {
+      const row = document.createElement('div');
+      row.className = 'settings-row dense';
+      row.dataset.path = setting.path;
+      const main = document.createElement('div');
+      main.className = 'settings-row-main';
+      const meta = LABELS[setting.path] || { label: setting.path, desc: '' };
+      main.innerHTML = `<div class="lbl">${escape(meta.label)}</div><div class="desc">${meta.desc || ''}</div>`;
+      row.appendChild(main);
+
+      const cur = getNested(prefsCache, setting.path);
+      row.appendChild(buildControl(setting, cur ?? setting.default));
+      sec.appendChild(row);
+    }
+    host.appendChild(sec);
+  }
+}
+
+// search filter for settings
+document.getElementById('settingsSearch')?.addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('.settings-section[data-section]').forEach(sec => {
+    const rows = sec.querySelectorAll('.settings-row[data-path]');
+    let any = false;
+    rows.forEach(row => {
+      const path = row.dataset.path.toLowerCase();
+      const lbl = row.querySelector('.lbl')?.textContent.toLowerCase() || '';
+      const desc = row.querySelector('.desc')?.textContent.toLowerCase() || '';
+      const match = !q || path.includes(q) || lbl.includes(q) || desc.includes(q);
+      row.classList.toggle('filtered', !match);
+      if (match) any = true;
+    });
+    sec.classList.toggle('empty-section', !any);
+  });
+});
+
+// rebind settings open to pull schema + prefs
+const _origOpenSettings = window.openSettings;
+window.openSettings = async function patchedOpenSettings() {
+  if (typeof _origOpenSettings === 'function') _origOpenSettings();
+  await loadPrefs(true);
+  if (schemaCache && schemaCache.length) renderSettings();
+};
+
+// Reset / Export / Import buttons
+document.getElementById('resetConfigBtn')?.addEventListener('click', async () => {
+  if (!confirm('Reset all settings to defaults? (your API key is preserved)')) return;
+  const r = await fetch('/api/config/reset', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reset_key: false }),
+  });
+  if (r.ok) {
+    if (typeof toast === 'function') toast('settings reset', 'ok');
+    await loadPrefs(true);
+    renderSettings();
+    load({ refresh: true });
+    loadBudgets();
+  }
+});
+
+document.getElementById('exportConfigBtn')?.addEventListener('click', async () => {
+  const r = await fetch('/api/config/export');
+  if (!r.ok) return;
+  const blob = new Blob([await r.text()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'suprbar-config.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  if (typeof toast === 'function') toast('config exported', 'ok');
+});
+
+document.getElementById('importConfigBtn')?.addEventListener('click', () => {
+  document.getElementById('importFileInput')?.click();
+});
+document.getElementById('importFileInput')?.addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  try {
+    const text = await f.text();
+    const payload = JSON.parse(text);
+    const r = await fetch('/api/config/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (r.ok) {
+      if (typeof toast === 'function') toast('imported', 'ok');
+      await loadPrefs(true); renderSettings();
+      load({ refresh: true });
+    } else {
+      const j = await r.json().catch(() => ({}));
+      if (typeof toast === 'function') toast(j.error?.message || 'import failed', 'err');
+    }
+  } catch (err) {
+    if (typeof toast === 'function') toast('invalid file: ' + err.message, 'err');
+  }
+  e.target.value = '';
+});
+
+// Boot prefs apply ASAP (before settings panel opens) so theme/density takes effect
+loadPrefs().then(() => {
+  if (document.getElementById('settingsOverlay') && !document.getElementById('settingsOverlay').hidden) {
+    renderSettings();
+  }
+});
+
+window.suprbar.setRange = setRange;
+window.suprbar.loadPrefs = loadPrefs;
+window.suprbar.loadBudgets = loadBudgets;
+
 } // end idempotency guard

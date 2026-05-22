@@ -288,6 +288,15 @@ def today_summary() -> dict[str, Any]:
     if not CLAUDE_HOME.exists():
         return _empty_today(started_at, files_scanned)
 
+    # Honor project allow/deny filters from config.
+    try:
+        from . import config as _cfg
+        _allow = set(_cfg.project_allowlist())
+        _deny  = set(_cfg.project_denylist())
+        _anonymize = _cfg.anonymize_projects()
+    except Exception:
+        _allow, _deny, _anonymize = set(), set(), False
+
     # Collect path + stat first so we can decide cached vs. reparse, then
     # parallelize the reparse work.
     with _scan_lock:
@@ -295,6 +304,11 @@ def today_summary() -> dict[str, Any]:
 
     candidates: list[tuple[Path, float, int, dict | None]] = []
     for path in CLAUDE_HOME.rglob("*.jsonl"):
+        proj_name = _project_name(path)
+        if _allow and proj_name not in _allow:
+            continue
+        if proj_name in _deny:
+            continue
         files_scanned += 1
         try:
             st = path.stat()
@@ -398,7 +412,13 @@ def today_summary() -> dict[str, Any]:
     if sessions:
         latest = max(sessions.values(), key=lambda s: s["mtime"])
         age = time.time() - latest["mtime"]
-        if age <= LIVE_WINDOW_SECONDS:
+        # Read live-window from config so the user setting actually applies.
+        try:
+            from . import config as _cfg
+            live_window = _cfg.live_threshold_seconds()
+        except Exception:
+            live_window = LIVE_WINDOW_SECONDS
+        if age <= live_window:
             active = latest
 
     # If no live session, find the most recently active one (for "last seen")
@@ -631,4 +651,324 @@ def _empty_scan(days: int, started: float) -> dict:
         "files_scanned": 0, "messages": 0, "sessions": 0, "parse_errors": 0,
         "grand_tokens": 0, "grand_cost": 0.0,
         "totals": {}, "by_day": {}, "by_project": {},
+    }
+
+
+# ---------- general range summary (user-configurable time window) ----------
+
+def _resolve_range(range_key: str | None,
+                   custom_start: str | None = None,
+                   custom_end:   str | None = None,
+                   week_starts_on: str = "mon",
+                   day_boundary: str = "local",
+                   rolling_24h: bool = False,
+                   ) -> tuple[datetime, datetime, str]:
+    """Translate a UI range key into concrete (start, end, label) datetimes."""
+    now = datetime.now().astimezone()
+    if day_boundary == "utc":
+        now_for_day = now.astimezone(timezone.utc)
+        tz = timezone.utc
+    else:
+        now_for_day = now
+        tz = now.tzinfo
+    today = now_for_day.date()
+
+    def at_midnight(d):  # noqa: ANN001
+        return datetime(d.year, d.month, d.day, tzinfo=tz)
+
+    end = at_midnight(today) + timedelta(days=1)
+
+    rk = (range_key or "today").lower()
+    if rk == "today":
+        if rolling_24h:
+            return now - timedelta(hours=24), now, "last 24h"
+        return at_midnight(today), end, "today"
+    if rk == "yesterday":
+        return at_midnight(today - timedelta(days=1)), at_midnight(today), "yesterday"
+    if rk == "24h":
+        return now - timedelta(hours=24), now, "last 24h"
+    if rk == "7d":
+        return at_midnight(today - timedelta(days=6)), end, "last 7 days"
+    if rk == "30d":
+        return at_midnight(today - timedelta(days=29)), end, "last 30 days"
+    if rk == "90d":
+        return at_midnight(today - timedelta(days=89)), end, "last 90 days"
+    if rk == "week":
+        # current calendar week
+        weekday = today.weekday()  # Mon=0..Sun=6
+        if week_starts_on == "sun":
+            offset = (weekday + 1) % 7
+        else:
+            offset = weekday
+        start = at_midnight(today - timedelta(days=offset))
+        return start, end, "this week"
+    if rk == "month":
+        start = at_midnight(today.replace(day=1))
+        return start, end, "this month"
+    if rk == "custom":
+        try:
+            s = datetime.fromisoformat(custom_start) if custom_start else at_midnight(today)
+            e = datetime.fromisoformat(custom_end) if custom_end else end
+            if s.tzinfo is None:
+                s = s.replace(tzinfo=tz)
+            if e.tzinfo is None:
+                e = e.replace(tzinfo=tz)
+            return s, e, f"{s.date()} → {e.date()}"
+        except ValueError:
+            pass
+    # fallback
+    return at_midnight(today), end, "today"
+
+
+def range_summary(range_key: str = "today",
+                  custom_start: str | None = None,
+                  custom_end:   str | None = None,
+                  week_starts_on: str = "mon",
+                  day_boundary: str = "local",
+                  rolling_24h: bool = False,
+                  allowlist: list[str] | None = None,
+                  denylist:  list[str] | None = None,
+                  anonymize: bool = False,
+                  include_weekends: bool = True,
+                  ) -> dict[str, Any]:
+    """Aggregate usage between (start, end) computed from `range_key`.
+
+    Shape (additive to today_summary):
+      { range: {key, label, start, end},
+        totals: {cost, messages, input, output, cache_5m, cache_1h, cache_read,
+                 tokens, cache_hit_ratio, sessions_today, projects_today},
+        by_day: [ {date, cost, tokens, messages} ],
+        by_model: [ {model, cost, messages, tokens} ],
+        by_project: [ {project, cost, messages, tokens, models[]} ],
+        hourly: [ {hour, cost, tokens, messages} ],          # only meaningful for ≤24h ranges
+        scan_ms, files_scanned, parse_errors }
+    """
+    started_at = time.time()
+    start_dt, end_dt, label = _resolve_range(
+        range_key, custom_start, custom_end, week_starts_on,
+        day_boundary, rolling_24h,
+    )
+    start_utc = start_dt.astimezone(timezone.utc)
+    end_utc   = end_dt.astimezone(timezone.utc)
+
+    allow = set(allowlist or [])
+    deny  = set(denylist  or [])
+
+    totals = _zero_bucket()
+    by_day_acc: dict[str, dict[str, float]] = defaultdict(lambda: {
+        "cost": 0.0, "messages": 0, "tokens": 0})
+    by_model_acc: dict[str, dict[str, float]] = defaultdict(lambda: {
+        "cost": 0.0, "messages": 0, "tokens": 0})
+    by_project_acc: dict[str, dict[str, Any]] = defaultdict(lambda: {
+        "cost": 0.0, "messages": 0, "tokens": 0, "models": set()})
+    hourly = [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
+              for h in range(24)]
+    sessions_seen: set[str] = set()
+
+    files_scanned = 0
+    parse_errors = 0
+
+    if not CLAUDE_HOME.exists():
+        return _empty_range(label, start_utc, end_utc, started_at)
+
+    for path in CLAUDE_HOME.rglob("*.jsonl"):
+        files_scanned += 1
+        proj = _project_name(path)
+        if allow and proj not in allow:
+            continue
+        if proj in deny:
+            continue
+
+        try:
+            f = open(path, "r", encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        try:
+            for raw in f:
+                line = raw.strip()
+                if not line or '"usage"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    parse_errors += 1
+                    continue
+                dt = _parse_ts(rec.get("timestamp"))
+                if dt is None:
+                    continue
+                if dt < start_utc or dt >= end_utc:
+                    continue
+                if not include_weekends and dt.astimezone().weekday() >= 5:
+                    continue
+                msg = rec.get("message") or {}
+                usage = msg.get("usage")
+                if not usage:
+                    continue
+                model = msg.get("model") or ""
+                fields = _extract_usage_fields(usage, model)
+                _add(totals, fields)
+                sid = rec.get("sessionId")
+                if sid:
+                    sessions_seen.add(sid)
+
+                local_dt = dt.astimezone()
+                day = local_dt.date().isoformat()
+                by_day_acc[day]["cost"] += fields["cost"]
+                by_day_acc[day]["messages"] += 1
+                by_day_acc[day]["tokens"] += (
+                    fields["input"] + fields["output"]
+                    + fields["cache_5m"] + fields["cache_1h"]
+                    + fields["cache_read"]
+                )
+
+                if model:
+                    by_model_acc[model]["cost"] += fields["cost"]
+                    by_model_acc[model]["messages"] += 1
+                    by_model_acc[model]["tokens"] += (
+                        fields["input"] + fields["output"]
+                        + fields["cache_5m"] + fields["cache_1h"]
+                        + fields["cache_read"]
+                    )
+
+                by_project_acc[proj]["cost"] += fields["cost"]
+                by_project_acc[proj]["messages"] += 1
+                by_project_acc[proj]["tokens"] += (
+                    fields["input"] + fields["output"]
+                    + fields["cache_5m"] + fields["cache_1h"]
+                    + fields["cache_read"]
+                )
+                if model:
+                    by_project_acc[proj]["models"].add(model)
+
+                # hourly only meaningful for ≤24h ranges
+                if (end_dt - start_dt) <= timedelta(hours=25):
+                    h = local_dt.hour
+                    hourly[h]["cost"] += fields["cost"]
+                    hourly[h]["tokens"] += (
+                        fields["input"] + fields["output"]
+                        + fields["cache_5m"] + fields["cache_1h"]
+                        + fields["cache_read"]
+                    )
+                    hourly[h]["messages"] += 1
+        finally:
+            f.close()
+
+    # Fill missing days in range for nicer chart line.
+    days_list = []
+    d = start_dt.date()
+    while d < end_dt.date():
+        key = d.isoformat()
+        b = by_day_acc.get(key, {"cost": 0.0, "messages": 0, "tokens": 0})
+        days_list.append({
+            "date": key,
+            "cost": round(b["cost"], 4),
+            "messages": int(b["messages"]),
+            "tokens": int(b["tokens"]),
+        })
+        d += timedelta(days=1)
+
+    by_model_list = sorted([
+        {"model": m, "cost": round(v["cost"], 4),
+         "messages": int(v["messages"]), "tokens": int(v["tokens"])}
+        for m, v in by_model_acc.items()
+    ], key=lambda x: -x["cost"])
+
+    by_project_list = []
+    proj_index = 0
+    for p, v in sorted(by_project_acc.items(), key=lambda kv: -kv[1]["cost"]):
+        proj_index += 1
+        display = f"project-{proj_index}" if anonymize else p
+        by_project_list.append({
+            "project": display,
+            "cost": round(v["cost"], 4),
+            "messages": int(v["messages"]),
+            "tokens": int(v["tokens"]),
+            "models": sorted(list(v["models"])),
+        })
+
+    cache_read = totals["cache_read"]
+    cache_hit_ratio = (cache_read / (totals["input"] + cache_read)) \
+        if (totals["input"] + cache_read) > 0 else 0.0
+
+    return {
+        "range": {
+            "key": range_key,
+            "label": label,
+            "start": start_dt.isoformat(timespec="seconds"),
+            "end":   end_dt.isoformat(timespec="seconds"),
+            "days":  max(1, (end_dt.date() - start_dt.date()).days),
+        },
+        "totals": {
+            "cost": round(totals["cost"], 4),
+            "messages": int(totals["messages"]),
+            **{k: int(totals[k]) for k in
+               ("input", "output", "cache_5m", "cache_1h", "cache_read")},
+            "tokens": int(totals["input"] + totals["output"]
+                          + totals["cache_5m"] + totals["cache_1h"]
+                          + totals["cache_read"]),
+            "cache_hit_ratio": round(cache_hit_ratio, 4),
+            "sessions": len(sessions_seen),
+            "projects": len(by_project_acc),
+        },
+        "by_day": days_list,
+        "by_model": by_model_list,
+        "by_project": by_project_list,
+        "hourly": hourly,
+        "files_scanned": files_scanned,
+        "parse_errors": parse_errors,
+        "scan_ms": int((time.time() - started_at) * 1000),
+    }
+
+
+def _empty_range(label: str, start: datetime, end: datetime, started: float) -> dict:
+    return {
+        "range": {"key": "today", "label": label,
+                  "start": start.isoformat(), "end": end.isoformat(), "days": 1},
+        "totals": {"cost": 0.0, "messages": 0, "tokens": 0,
+                   "input": 0, "output": 0, "cache_5m": 0, "cache_1h": 0,
+                   "cache_read": 0, "cache_hit_ratio": 0.0,
+                   "sessions": 0, "projects": 0},
+        "by_day": [], "by_model": [], "by_project": [],
+        "hourly": [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
+                   for h in range(24)],
+        "files_scanned": 0, "parse_errors": 0,
+        "scan_ms": int((time.time() - started) * 1000),
+    }
+
+
+# ---------- budgets ----------
+
+def budgets_summary(daily_limit: float, weekly_limit: float, monthly_limit: float,
+                    week_starts_on: str = "mon",
+                    allowlist: list[str] | None = None,
+                    denylist:  list[str] | None = None,
+                    ) -> dict[str, Any]:
+    """Return spent vs limit for day/week/month windows.
+
+    Useful for budget alerts. Reuses range_summary so all filters apply.
+    """
+    today = range_summary("today",
+                          allowlist=allowlist, denylist=denylist)
+    week  = range_summary("week", week_starts_on=week_starts_on,
+                          allowlist=allowlist, denylist=denylist)
+    month = range_summary("month",
+                          allowlist=allowlist, denylist=denylist)
+
+    def b(spent: float, limit: float) -> dict[str, Any]:
+        if limit <= 0:
+            return {"spent": round(spent, 4), "limit": 0.0,
+                    "pct": 0.0, "over": False, "remaining": 0.0}
+        pct = (spent / limit) * 100
+        return {
+            "spent": round(spent, 4),
+            "limit": round(limit, 4),
+            "pct": round(pct, 2),
+            "over": spent >= limit,
+            "remaining": round(max(0.0, limit - spent), 4),
+        }
+
+    return {
+        "daily":   b(today["totals"]["cost"], daily_limit),
+        "weekly":  b(week["totals"]["cost"],  weekly_limit),
+        "monthly": b(month["totals"]["cost"], monthly_limit),
     }
