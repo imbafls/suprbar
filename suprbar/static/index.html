@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
+<body class="loading">
   <div id="root">
     <div class="flyout" id="flyout">
       <!-- header -->
@@ -20,15 +20,15 @@
           <span class="ver">v0.1</span>
         </div>
         <div class="head-actions">
-          <button class="icon-btn pin-btn" id="pinBtn" aria-label="pin" title="Pin (don't auto-hide)">
+          <button class="icon-btn pin-btn" id="pinBtn" aria-label="Pin popup (don't auto-hide)" data-tip="Pin (don't auto-hide)">
             <!-- pin icon -->
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 17v5"/>
               <path d="M15 9.34V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v3.34a3 3 0 0 1-1.41 2.55L6 13h12l-1.59-1.11A3 3 0 0 1 15 9.34Z"/>
             </svg>
           </button>
-          <button class="icon-btn" id="settingsBtn" aria-label="settings" title="Settings">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="icon-btn" id="settingsBtn" aria-label="Open settings" data-tip="Settings (Ctrl+,)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <circle cx="12" cy="12" r="3"/>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
@@ -45,20 +45,21 @@
             session live
           </span>
         </div>
-        <div class="cost" id="costNum">
+        <div class="cost" id="costNum" aria-live="polite" aria-atomic="true">
           <span class="currency">$</span><span id="costWhole">0</span><span class="cents" id="costCents">.00</span>
         </div>
         <div class="source-line" id="sourceLine" hidden></div>
 
-        <div class="token-bar">
+        <div class="token-bar" aria-hidden="true">
           <div class="tb-input"  id="tbIn"    style="width: 0%"></div>
           <div class="tb-output" id="tbOut"   style="width: 0%"></div>
           <div class="tb-cache"  id="tbCache" style="width: 0%"></div>
         </div>
         <div class="token-legend">
-          <span class="item"><span class="sw" style="background: var(--b-accent)"></span>in · <span id="legIn">0</span></span>
-          <span class="item"><span class="sw" style="background: var(--b-violet)"></span>out · <span id="legOut">0</span></span>
-          <span class="item"><span class="sw" style="background: var(--b-success)"></span>cache · <span id="legCache">0</span></span>
+          <span class="item" data-tip="Input tokens sent to the model"><span class="sw" style="background: var(--b-accent)"></span>in · <span id="legIn">0</span></span>
+          <span class="item" data-tip="Output tokens generated"><span class="sw" style="background: var(--b-violet)"></span>out · <span id="legOut">0</span></span>
+          <span class="item" data-tip="Cached prompt tokens"><span class="sw" style="background: var(--b-success)"></span>cache · <span id="legCache">0</span></span>
+          <span class="cache-hit" id="cacheHit" data-tip="Cache hit ratio"></span>
         </div>
       </div>
 
@@ -76,14 +77,39 @@
           <div class="metric-label">Started</div>
           <div class="metric-value small" id="mStarted">—</div>
         </div>
+        <div class="metric" id="mBurnCell">
+          <div class="metric-label">Burn</div>
+          <div class="metric-value small" id="mBurn">—</div>
+        </div>
       </div>
 
+      <!-- top projects mini-list -->
+      <details class="projects-list" id="projectsList">
+        <summary>
+          <span class="proj-title">Top projects today</span>
+          <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </summary>
+        <ol id="projectsListItems"></ol>
+      </details>
+
       <!-- empty state (idle) -->
-      <div class="empty-state" id="emptyState" hidden>
+      <div class="empty-state" id="emptyState" role="status" hidden>
         <div class="glyph">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <defs>
+              <filter id="emptyGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.2" result="b"/>
+                <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <circle cx="24" cy="24" r="18" stroke="rgba(91,141,239,0.28)" stroke-width="1" filter="url(#emptyGlow)"/>
+            <circle cx="24" cy="24" r="13" stroke="rgba(140,91,239,0.22)" stroke-width="1"/>
+            <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+              <circle cx="24" cy="24" r="9"/>
+              <polyline points="24 18 24 24 28 26"/>
+            </g>
           </svg>
         </div>
         <div class="t">No sessions running</div>
@@ -94,7 +120,7 @@
       <div class="flyout-foot">
         <span id="footMeta">watching ~/.claude</span>
         <div class="actions">
-          <button class="btn-sm" id="openLogsBtn">Open logs</button>
+          <button class="btn-sm" id="openLogsBtn" data-tip="Open ~/.claude (Ctrl+L)">Open logs</button>
         </div>
       </div>
 
@@ -102,8 +128,8 @@
       <div class="settings-overlay" id="settingsOverlay" hidden>
         <div class="settings-head">
           <div class="title">Settings</div>
-          <button class="icon-btn" id="settingsCloseBtn" aria-label="close" title="Close (Esc)">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <button class="icon-btn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
@@ -119,7 +145,7 @@
                 <div class="lbl">Claude Code · local</div>
                 <div class="desc">Reads <span class="mono">~/.claude/projects/**/*.jsonl</span>. Always on.</div>
               </div>
-              <div class="toggle on disabled" title="Required source"></div>
+              <button type="button" class="toggle on disabled" aria-label="Local source (always on)" aria-disabled="true" aria-pressed="true" tabindex="-1" data-tip="Required source"></button>
             </div>
 
             <div class="settings-row">
@@ -127,13 +153,13 @@
                 <div class="lbl">Anthropic API</div>
                 <div class="desc">Org-wide spend via the Admin API. Requires an admin key (<span class="mono">sk-ant-admin01-…</span>).</div>
                 <div class="input-row">
-                  <input type="password" id="adminKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-ant-admin01-…">
+                  <input type="password" id="adminKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-ant-admin01-…" aria-label="Anthropic admin key">
                   <button class="btn-sm" id="testKeyBtn">Test</button>
                   <button class="btn-sm" id="clearKeyBtn">Clear</button>
                 </div>
-                <div class="status-line" id="keyStatus"></div>
+                <div class="status-line" id="keyStatus" aria-live="polite"></div>
               </div>
-              <div class="toggle" id="anthropicToggle"></div>
+              <button type="button" class="toggle" id="anthropicToggle" aria-label="Enable Anthropic API source" aria-pressed="false"></button>
             </div>
           </div>
 
@@ -145,7 +171,7 @@
                 <div class="lbl">Pin popup (don't auto-hide)</div>
                 <div class="desc">Stay open when focus moves elsewhere.</div>
               </div>
-              <div class="toggle" id="pinnedToggle"></div>
+              <button type="button" class="toggle" id="pinnedToggle" aria-label="Pin popup" aria-pressed="false"></button>
             </div>
 
             <div class="settings-row">
@@ -153,7 +179,7 @@
                 <div class="lbl">Start on Windows sign-in</div>
                 <div class="desc">Launch supr.bar automatically when you log in.</div>
               </div>
-              <div class="toggle" id="startupToggle"></div>
+              <button type="button" class="toggle" id="startupToggle" aria-label="Start on Windows sign-in" aria-pressed="false"></button>
             </div>
           </div>
 
@@ -162,7 +188,7 @@
             <div class="settings-row">
               <div class="settings-row-main">
                 <div class="lbl">supr.bar v0.1</div>
-                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">Alt+Q</span> quit</div>
+                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">Alt+Q</span> quit · <span class="mono">?</span> all shortcuts</div>
               </div>
             </div>
           </div>
@@ -170,6 +196,34 @@
       </div>
     </div>
   </div>
+
+  <!-- shortcuts help overlay -->
+  <dialog id="shortcutsHelp" class="shortcuts-help" aria-label="Keyboard shortcuts">
+    <div class="sh-head">
+      <div class="title">Keyboard shortcuts</div>
+      <form method="dialog">
+        <button class="icon-btn" value="close" aria-label="Close shortcuts">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+    <ul class="sh-list">
+      <li><span class="sh-desc">Close popup</span><kbd>Esc</kbd></li>
+      <li><span class="sh-desc">Refresh data</span><kbd>F5</kbd></li>
+      <li><span class="sh-desc">Quit app</span><kbd>Alt</kbd><kbd>Q</kbd></li>
+      <li><span class="sh-desc">Open settings</span><kbd>Ctrl</kbd><kbd>,</kbd></li>
+      <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl</kbd><kbd>L</kbd></li>
+      <li><span class="sh-desc">Export today</span><kbd>Ctrl</kbd><kbd>E</kbd></li>
+      <li><span class="sh-desc">Hide window</span><kbd>Ctrl</kbd><kbd>W</kbd></li>
+      <li><span class="sh-desc">This help</span><kbd>?</kbd></li>
+    </ul>
+  </dialog>
+
+  <!-- toast (JS toggles [hidden] + .show) -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="/app.js"></script>
 </body>

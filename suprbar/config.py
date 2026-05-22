@@ -11,6 +11,7 @@ import ctypes
 import json
 import logging
 import os
+import shutil
 import sys
 import threading
 from ctypes import wintypes
@@ -28,11 +29,27 @@ def config_dir() -> Path:
     return Path(base) / "suprbar"
 
 
+def local_data_dir() -> Path:
+    """%LOCALAPPDATA%\\suprbar on Windows; ~/.local/share/suprbar elsewhere."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "suprbar"
+
+
 def config_path() -> Path:
     return config_dir() / "config.json"
 
 
+def window_state_path() -> Path:
+    return local_data_dir() / "window-state.json"
+
+
+SCHEMA_VERSION = 1
+
 DEFAULTS: dict[str, Any] = {
+    "schema_version": SCHEMA_VERSION,
     "sources": {
         "local": {"enabled": True},
         "anthropic_api": {
@@ -122,6 +139,22 @@ def _merge_defaults(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _migrate(d: dict[str, Any]) -> dict[str, Any]:
+    """Bump older configs to the current schema."""
+    if not isinstance(d, dict):
+        return json.loads(json.dumps(DEFAULTS))
+    v = d.get("schema_version")
+    if not isinstance(v, int) or v < 1:
+        # Pre-versioned config: ensure shape is sane, then stamp v1.
+        if "sources" not in d or not isinstance(d.get("sources"), dict):
+            d["sources"] = json.loads(json.dumps(DEFAULTS["sources"]))
+        if "ui" not in d or not isinstance(d.get("ui"), dict):
+            d["ui"] = json.loads(json.dumps(DEFAULTS["ui"]))
+        d["schema_version"] = 1
+        log.info("config migrated to schema_version=1")
+    return d
+
+
 def load(force: bool = False) -> dict[str, Any]:
     global _cache
     with _lock:
@@ -133,7 +166,8 @@ def load(force: bool = False) -> dict[str, Any]:
             return _cache
         try:
             raw = json.loads(p.read_text("utf-8"))
-            _cache = _merge_defaults(raw if isinstance(raw, dict) else {})
+            migrated = _migrate(raw if isinstance(raw, dict) else {})
+            _cache = _merge_defaults(migrated)
         except (OSError, json.JSONDecodeError) as e:
             log.warning("config load failed: %s — using defaults", e)
             _cache = json.loads(json.dumps(DEFAULTS))
@@ -144,11 +178,38 @@ def save(cfg: dict[str, Any]) -> None:
     with _lock:
         p = config_path()
         p.parent.mkdir(parents=True, exist_ok=True)
+        # Backup existing config (best-effort) before atomic replace.
+        if p.exists():
+            try:
+                shutil.copy2(p, p.with_suffix(".json.bak"))
+            except OSError as e:
+                log.warning("config backup failed: %s", e)
         tmp = p.with_suffix(".json.tmp")
+        # Ensure schema_version is stamped.
+        if "schema_version" not in cfg:
+            cfg["schema_version"] = SCHEMA_VERSION
         tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         os.replace(tmp, p)
         global _cache
         _cache = cfg
+
+
+def reset(reset_key: bool = False) -> dict[str, Any]:
+    """Reset config to defaults. If reset_key=False, preserve the admin key."""
+    existing_key = None
+    if not reset_key:
+        existing_key = None
+        try:
+            cur = load()
+            existing_key = cur.get("sources", {}).get("anthropic_api", {}).get("admin_key_enc", "")
+        except Exception:
+            existing_key = None
+
+    fresh = json.loads(json.dumps(DEFAULTS))
+    if not reset_key and existing_key:
+        fresh.setdefault("sources", {}).setdefault("anthropic_api", {})["admin_key_enc"] = existing_key
+    save(fresh)
+    return fresh
 
 
 # ---------- helpers for the admin key ----------
@@ -224,6 +285,51 @@ def set_start_on_login(v: bool) -> None:
     cfg = load()
     cfg.setdefault("ui", {})["start_on_login"] = bool(v)
     save(cfg)
+
+
+# ---------- Window state (popup pos/size/pinned) ----------
+
+_WINDOW_DEFAULT: dict[str, Any] = {
+    "x": None, "y": None, "w": None, "h": None, "pinned": False,
+}
+
+
+def load_window_state() -> dict[str, Any]:
+    p = window_state_path()
+    if not p.exists():
+        return dict(_WINDOW_DEFAULT)
+    try:
+        raw = json.loads(p.read_text("utf-8"))
+        if not isinstance(raw, dict):
+            return dict(_WINDOW_DEFAULT)
+        out = dict(_WINDOW_DEFAULT)
+        for k in _WINDOW_DEFAULT.keys():
+            if k in raw:
+                out[k] = raw[k]
+        return out
+    except (OSError, json.JSONDecodeError):
+        return dict(_WINDOW_DEFAULT)
+
+
+def save_window_state(state: dict[str, Any]) -> dict[str, Any]:
+    p = window_state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    cur = load_window_state()
+    # Only accept known keys + type coerce.
+    for k in _WINDOW_DEFAULT.keys():
+        if k in state:
+            v = state[k]
+            if k == "pinned":
+                cur[k] = bool(v)
+            else:
+                try:
+                    cur[k] = int(v) if v is not None else None
+                except (TypeError, ValueError):
+                    pass
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cur, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+    return cur
 
 
 # ---------- Windows "Run on login" registry helper ----------
