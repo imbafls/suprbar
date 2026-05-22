@@ -3,3 +3,6 @@ __pycache__/
 *.pyo
 *.log
 design/
+build/
+dist/
+*.spec.bak

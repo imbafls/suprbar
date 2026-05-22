@@ -1,74 +1,164 @@
+<div align="center">
+
+<img src="docs/brand/mark-256.png" width="96" alt="supr.bar"/>
+
 # supr.bar
 
-Windows tray app for Claude Code (+ Anthropic API) token usage and equivalent
-cost. Frameless flyout that pops out of the system tray, built to the supr.bar
-design spec at `design/supr-bar/project/`.
+**A coach in your tray, not a counter.**
 
-## Run
+A tray companion for Windows 11 that watches your local Claude Code sessions
+and surfaces specific, actionable observations — when you're iterating in
+circles, when you're winning, when to stop.
 
-```bash
+No login. No telemetry. Just your data, observed.
+
+</div>
+
+---
+
+> **Status:** v0.4-dev. The legacy "usage counter" flyout still works and
+> ships in releases; the **coach** rules engine is being built in parallel.
+> See [`pivot_v1.md`](./pivot_v1.md) for the plan and
+> [`CHANGELOG.md`](./CHANGELOG.md) for history.
+
+## What it does
+
+- Reads `~/.claude/projects/**/*.jsonl` — no API key, no cloud.
+- Runs a small set of **rules** against each live session.
+- When a rule fires, drops the observation into the tray flyout:
+  > **You're iterating in circles.**
+  > 73 % of the last 30 minutes was cache reads with three rewrites of
+  > `popup.py`. Worth restating the constraint in a fresh prompt.
+- When the session goes idle, writes a 3-bullet markdown retro to
+  `~/.suprbar/sessions/<date>.md`.
+
+The cost number stays in the corner. It is not the point.
+
+## Install
+
+### From release (recommended)
+
+Download the latest `suprbar-setup.exe` from
+[Releases](https://github.com/omertaji/suprbar/releases), run it, done.
+suprbar lives in your tray.
+
+### From source
+
+```sh
+git clone https://github.com/omertaji/suprbar
+cd suprbar
 pip install -r requirements.txt
 python -m suprbar
 ```
 
-Or double-click `run.bat` for a silent launch (no console window).
+Requires Python 3.11+, Windows 11 (Win10 should work but is not the primary
+target), and a WebView2 runtime (preinstalled on Win11).
 
-## Features (MVP)
+## Quick start
 
-- **Tray icon + popout** — left-click to toggle the flyout, right-click for menu
-- **Active session view** — "Today · Claude Code" cost, token-mix bar, Messages /
-  Model / Started metric trio, live pulse indicator
-- **Idle view** — empty state with "last seen N ago"
-- **Local source** — reads `~/.claude/projects/**/*.jsonl`, no API key needed
-- **Anthropic API source** — adds Admin API usage + cost (org-wide) via
-  `sk-ant-admin01-…` key. Stored DPAPI-encrypted in `%APPDATA%\suprbar\config.json`
-- **Settings overlay** — gear icon → toggle sources, paste & test API key,
-  toggle pin / start-on-login
-- **Pin** — header pin button or Settings toggle; disables auto-hide on blur
-- **Start on Windows sign-in** — writes HKCU\\…\\Run entry to `run.bat`
-- **Keyboard** — Esc closes, F5 refreshes, Alt+Q quits, Ctrl+, opens settings
-- **Drag** — click & drag the header to reposition
+1. Launch suprbar. A gradient "S" appears in your system tray.
+2. Open Claude Code and start a session.
+3. Click the tray icon to see the live flyout.
+4. Right-click → Settings to tweak refresh, theme, hotkeys.
+5. After your next session ends, find the retro at
+   `%USERPROFILE%\.suprbar\sessions\<date>.md`.
 
-## Architecture
+## How it works
 
 ```
-suprbar/
-  __main__.py          python -m suprbar
-  popup.py             pywebview frameless popout + Win32 DWM corner round
-  tray.py              pystray gradient icon + menu + tooltip
-  server.py            127.0.0.1 HTTP server / static / api routes
-  scanner.py           ~/.claude/projects/**/*.jsonl walker + today summary
-  aggregator.py        combine all sources into a single response
-  config.py            %APPDATA%\\suprbar\\config.json + DPAPI for secrets
-  pricing.py           per-token rates (edit when Anthropic adjusts)
-  providers/
-    local.py           wraps scanner
-    anthropic_api.py   /v1/organizations/{cost,usage}_report
-  static/              index.html, app.js, styles.css (Geist + Geist Mono)
-run.bat                silent launcher
+~/.claude/projects/*.jsonl
+        │
+        ▼
+ ┌─────────────────┐
+ │  scanner.py     │  incremental, mtime-keyed, parallel pool
+ └────────┬────────┘
+          ▼
+ ┌─────────────────┐
+ │ coach/context   │  rolling 7-day stats + active session
+ └────────┬────────┘
+          ▼
+ ┌─────────────────┐
+ │ coach/engine    │  run all Rules, pick the highest-confidence one
+ └────────┬────────┘
+          ▼
+ ┌─────────────────┐
+ │  WebView2 popup │  hero observation + small cost chip
+ └─────────────────┘
 ```
 
-## Source: local (default, no key required)
+Every observation is the output of a small Python class that subclasses
+`Rule` and lives in `suprbar/coach/rules/`. Rules are discovered at boot.
+See [`docs/extending.md`](./docs/extending.md) to write one.
 
-Walks every JSONL session log, sums `message.usage` for today (local day),
-detects an active session by JSONL `mtime` within the last 60s.
+## Writing a rule (under 30 lines)
 
-Costs are computed at current Anthropic per-token rates (see `pricing.py`).
-You actually pay $0 on a Max subscription — this is the *equivalent API spend*.
+```python
+# suprbar/coach/rules/my_rule.py
+from suprbar.coach.rule import Observation, Rule
 
-## Source: Anthropic API (optional)
+class LongMessage(Rule):
+    id = "long-message"
+    name = "Very long message"
+    description = "Nudges when the last user message exceeds 4k chars."
 
-Requires an admin-scoped key from your org settings. The key is stored
-DPAPI-encrypted (Windows user-scoped). The Test button hits a 1-day cost-report
-range to verify before saving.
+    def evaluate(self, ctx):
+        last = ctx.recent_user_messages(limit=1)
+        if not last:
+            return None
+        msg = last[0]
+        if len(msg.text) < 4_000:
+            return None
+        return Observation(
+            id=self.id, severity="info", confidence=0.7,
+            title="Long prompt",
+            body=f"Your last message was {len(msg.text):,} chars. "
+                 "Long prompts often hide multiple asks.",
+            tip="Split into two turns: state the constraint, then the change.",
+        )
+```
 
-Endpoints used:
-- `GET /v1/organizations/cost_report?bucket_width=1d` — today's spend (USD)
-- `GET /v1/organizations/usage_report/messages?bucket_width=1h&group_by[]=model`
-  — token counts for today
+Drop the file. Restart suprbar. The rule is live. Toggle it in
+Settings → Coach.
 
-## Config file
+## Philosophy
 
-Plain JSON at `%APPDATA%\suprbar\config.json`. The admin key is a DPAPI blob
-inside `sources.anthropic_api.admin_key_enc`. Safe to delete to reset all
-preferences.
+- **Observe, don't nag.** Severity tops out at `warn`; supr.bar never
+  blocks, modals, or beeps unless you ask.
+- **Your data stays local.** Zero phone-home. Anthropic Admin API is opt-in
+  only.
+- **Plain text wins.** Session retros are markdown files in a folder. No
+  database, no proprietary format.
+- **Extension over configuration.** The setting panel is small; rules are
+  small; if you need more, write a rule.
+
+## Roadmap (high-level)
+
+See [`pivot_v1.md`](./pivot_v1.md) for detail.
+
+- **v0.4 — coach v0** · 6 built-in rules, session wraps
+- **v0.5 — extension surface** · rule template, docs, first external rule
+- **v0.6 — receipt artifact** · session-card PNG, one-click copy
+- **v0.7 — patterns** · weekly Sunday-night summary
+- **v1.0 — cross-platform** · macOS + Linux popup ports
+
+## Contributing
+
+PRs welcome on any of:
+
+- New rules (the most useful contribution surface).
+- Themes (`suprbar/static/themes/*.css`).
+- Data sources beyond local JSONL.
+- Translations of observation copy.
+- Bug reports with a session JSONL excerpt that reproduces the issue.
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+## License
+
+MIT. See [`LICENSE`](./LICENSE).
+
+---
+
+<div align="center">
+<sub>Built by <a href="https://github.com/omertaji">@omertaji</a>. Not affiliated with Anthropic.</sub>
+</div>

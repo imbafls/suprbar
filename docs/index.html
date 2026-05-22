@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>supr.bar — a coach in your tray, not a counter</title>
+  <meta name="description" content="A tray companion for Windows that watches your local Claude Code sessions and surfaces actionable observations. MIT-licensed, no telemetry.">
+  <meta property="og:title" content="supr.bar">
+  <meta property="og:description" content="A coach in your tray, not a counter.">
+  <meta property="og:image" content="./brand/social-card.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" type="image/png" sizes="32x32" href="./brand/mark-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./brand/mark-16.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --b-accent: #5b8def;
+      --b-accent-hot: #7aa8ff;
+      --b-violet: #8c5bef;
+      --b-success: #4ade80;
+      --b-warn: #fbbf24;
+      --b-danger: #f87171;
+      --bg-grad-top: #1a1f2e;
+      --bg-grad-bot: #0d1018;
+      --surface: rgba(28, 30, 38, 0.92);
+      --surface-2: rgba(255,255,255,0.025);
+      --text: #f4f5f7;
+      --text-dim: rgba(255,255,255,0.55);
+      --text-dimmer: rgba(255,255,255,0.45);
+      --hairline: rgba(255,255,255,0.08);
+      --sans: 'Geist', ui-sans-serif, -apple-system, 'Segoe UI', system-ui, sans-serif;
+      --mono: 'Geist Mono', ui-monospace, 'JetBrains Mono', 'Cascadia Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg-grad-bot); color: var(--text); font-family: var(--sans); }
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse at 25% 12%, rgba(91, 141, 239, 0.14), transparent 60%),
+        radial-gradient(ellipse at 80% 90%, rgba(140, 91, 239, 0.12), transparent 60%),
+        linear-gradient(180deg, var(--bg-grad-top) 0%, var(--bg-grad-bot) 100%);
+      line-height: 1.55;
+    }
+    a { color: var(--b-accent-hot); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: var(--mono); font-size: 0.95em; }
+    pre {
+      background: rgba(0,0,0,0.35);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-size: 12.5px;
+      color: rgba(255,255,255,0.92);
+    }
+    .container { max-width: 880px; margin: 0 auto; padding: 64px 28px 96px; }
+    nav.top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 80px; }
+    nav.top .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; }
+    nav.top .brand img { width: 22px; height: 22px; border-radius: 5px; }
+    nav.top .links a { color: var(--text-dim); font-family: var(--mono); font-size: 12px; margin-left: 18px; }
+    nav.top .links a:hover { color: var(--text); }
+
+    header.hero { text-align: left; margin-bottom: 80px; }
+    header.hero .mark { width: 64px; height: 64px; border-radius: 14px; margin-bottom: 28px; }
+    header.hero h1 { font-size: clamp(40px, 7vw, 64px); font-weight: 600; letter-spacing: -0.025em; margin: 0 0 18px; line-height: 1.05; }
+    header.hero h1 .accent { background: linear-gradient(135deg, var(--b-accent), var(--b-violet)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    header.hero .tag { font-size: 18px; color: var(--text-dim); max-width: 620px; margin: 0 0 32px; }
+    .cta-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-radius: 8px;
+      font-family: var(--mono); font-size: 13px;
+      border: 1px solid var(--hairline); color: var(--text);
+      background: var(--surface);
+      transition: background 120ms, transform 100ms;
+    }
+    .btn:hover { background: rgba(255,255,255,0.06); transform: translateY(-1px); text-decoration: none; }
+    .btn.primary { background: linear-gradient(135deg, var(--b-accent), var(--b-violet)); border-color: transparent; color: white; }
+    .btn.primary:hover { filter: brightness(1.08); }
+
+    section { margin-bottom: 72px; }
+    section h2 {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--text-dim);
+      margin: 0 0 24px; font-weight: 500;
+    }
+    section h3 { font-size: 22px; font-weight: 500; letter-spacing: -0.015em; margin: 0 0 12px; }
+    section p { color: var(--text-dim); max-width: 720px; }
+
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .card { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 10px; padding: 22px 22px; }
+    .card .icon { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--b-accent), var(--b-violet)); margin-bottom: 14px; }
+    .card h3 { font-size: 16px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.005em; }
+    .card p { font-size: 13.5px; margin: 0; color: var(--text-dim); }
+
+    .observation {
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+      border-left: 3px solid var(--b-warn);
+      padding: 18px 22px;
+      border-radius: 10px;
+      max-width: 580px;
+    }
+    .observation .meta { font-family: var(--mono); font-size: 10.5px; color: var(--b-warn); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+    .observation h4 { font-size: 17px; margin: 0 0 8px; font-weight: 500; }
+    .observation p { font-size: 14px; color: var(--text-dim); margin: 0 0 10px; max-width: none; }
+    .observation .tip { font-family: var(--mono); font-size: 12px; color: var(--b-accent-hot); }
+
+    footer { margin-top: 96px; padding-top: 24px; border-top: 1px solid var(--hairline); font-family: var(--mono); font-size: 11px; color: var(--text-dimmer); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+    @media (max-width: 600px) {
+      .container { padding: 36px 18px 64px; }
+      nav.top { margin-bottom: 56px; }
+      nav.top .links a { margin-left: 10px; font-size: 11.5px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav class="top">
+      <a class="brand" href="./">
+        <img src="./brand/mark-64.png" alt="">
+        supr.bar
+      </a>
+      <div class="links">
+        <a href="https://github.com/omertaji/suprbar">GitHub</a>
+        <a href="https://github.com/omertaji/suprbar#install">Install</a>
+        <a href="https://github.com/omertaji/suprbar/blob/main/docs/extending.md">Extend</a>
+        <a href="https://github.com/omertaji/suprbar/blob/main/pivot_v1.md">Roadmap</a>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <img class="mark" src="./brand/mark-256.png" alt="supr.bar logo">
+      <h1>A <span class="accent">coach</span> in your tray, not a counter.</h1>
+      <p class="tag">supr.bar watches your local Claude Code sessions and surfaces specific observations &mdash; when you're iterating in circles, when you're winning, when to stop. No login. No telemetry. Just your data, observed.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/omertaji/suprbar/releases">Download for Windows</a>
+        <a class="btn" href="https://github.com/omertaji/suprbar">View on GitHub</a>
+      </div>
+    </header>
+
+    <section>
+      <h2>Example observation</h2>
+      <div class="observation">
+        <div class="meta">nudge · circling-in-cache · 0.81 confidence</div>
+        <h4>You're iterating in circles.</h4>
+        <p>73% of the last 30 minutes was cache reads with three rewrites of <code>popup.py</code>. Worth restating the constraint in a fresh prompt.</p>
+        <div class="tip">Tip: close the current message, write one sentence describing what "done" looks like, paste it as a new turn.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>What you get</h2>
+      <div class="grid-3">
+        <div class="card">
+          <div class="icon"></div>
+          <h3>Live observations</h3>
+          <p>Six built-in rules watch your active session and surface notes when something changes &mdash; signal, not noise.</p>
+        </div>
+        <div class="card">
+          <div class="icon"></div>
+          <h3>Session retros</h3>
+          <p>When a session goes idle, supr.bar drops a 3-bullet markdown summary into <code>~/.suprbar/sessions/</code>.</p>
+        </div>
+        <div class="card">
+          <div class="icon"></div>
+          <h3>Local only</h3>
+          <p>Reads <code>~/.claude/projects/**/*.jsonl</code> directly. Nothing leaves your machine.</p>
+        </div>
+        <div class="card">
+          <div class="icon"></div>
+          <h3>Write your own rule</h3>
+          <p>Drop a 30-line Python file into <code>~/.suprbar/rules/</code>. The coach picks it up at next launch.</p>
+        </div>
+        <div class="card">
+          <div class="icon"></div>
+          <h3>Tiny config</h3>
+          <p>Roughly a dozen settings. Themes, density, hotkeys, per-rule mute. That's it.</p>
+        </div>
+        <div class="card">
+          <div class="icon"></div>
+          <h3>MIT-licensed</h3>
+          <p>Free for personal and commercial use. Fork it, ship a variant, name it whatever &mdash; we're flattered.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Install</h2>
+      <p>Two paths &mdash; pick one.</p>
+      <pre><span style="color:rgba(255,255,255,0.4)"># 1. Pre-built installer</span>
+Download suprbar-setup.exe from the GitHub Releases page, run it.
+
+<span style="color:rgba(255,255,255,0.4)"># 2. From source (Python 3.11+)</span>
+git clone https://github.com/omertaji/suprbar
+cd suprbar
+pip install -r requirements.txt
+python -m suprbar</pre>
+    </section>
+
+    <section>
+      <h2>Write a rule in 30 lines</h2>
+      <pre><span style="color:#c084fc">from</span> suprbar.coach.rule <span style="color:#c084fc">import</span> Observation, Rule
+
+
+<span style="color:#c084fc">class</span> LongMessage(Rule):
+    id          = <span style="color:#86efac">"long-message"</span>
+    name        = <span style="color:#86efac">"Long prompt"</span>
+    description = <span style="color:#86efac">"Nudges when the last message is over 4k chars."</span>
+
+    <span style="color:#c084fc">def</span> evaluate(self, ctx):
+        last = ctx.recent_user_messages(limit=1)
+        <span style="color:#c084fc">if not</span> last <span style="color:#c084fc">or</span> len(last[0].text) &lt; 4_000:
+            <span style="color:#c084fc">return None</span>
+        <span style="color:#c084fc">return</span> Observation(
+            id=self.id, severity=<span style="color:#86efac">"info"</span>, confidence=0.7,
+            title=<span style="color:#86efac">"Long prompt"</span>,
+            body=f<span style="color:#86efac">"Your last message was {len(last[0].text):,} chars. "</span>
+                 <span style="color:#86efac">"Long prompts often hide multiple asks."</span>,
+            tip=<span style="color:#86efac">"Split into two turns: state the constraint, then the change."</span>,
+        )</pre>
+      <p>Drop it in <code>suprbar/coach/rules/</code> or <code>~/.suprbar/rules/</code>. Restart. <a href="https://github.com/omertaji/suprbar/blob/main/docs/extending.md">Full extension guide</a>.</p>
+    </section>
+
+    <section>
+      <h2>Philosophy</h2>
+      <p><b>Observe, don't nag.</b> Severity tops out at <code>warn</code> and never blocks.</p>
+      <p><b>Your data stays local.</b> Zero phone-home. Anthropic Admin API integration is opt-in only.</p>
+      <p><b>Plain text wins.</b> Session retros are markdown files in a folder.</p>
+      <p><b>Extension over configuration.</b> The settings panel is intentionally small. If you need more, write a rule.</p>
+    </section>
+
+    <footer>
+      <span>MIT &middot; not affiliated with Anthropic</span>
+      <span>Built by <a href="https://github.com/omertaji">@omertaji</a></span>
+    </footer>
+  </div>
+</body>
+</html>

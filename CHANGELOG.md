@@ -1,5 +1,30 @@
 # supr.bar CHANGELOG
 
+## v0.4 — pivot to coach (planned)
+
+**Direction change.** supr.bar pivots from a passive usage counter to an
+active coach. See `pivot_v1.md` for the full plan.
+
+- New `suprbar/coach/` package: `Rule`, `Observation`, `SessionContext`,
+  `engine.py`, six built-in rules.
+- Session retros: idle → `~/.suprbar/sessions/<date>.md`.
+- Settings panel collapses from 74 entries to roughly 12.
+- Range tabs, budget UI, and project allow/deny UI are removed; their
+  backend stays for reuse.
+- New brand & docs: `BRAND.md`, `README.md` (rewritten),
+  `CONTRIBUTING.md`, `docs/extending.md`, `docs/index.html`, MIT
+  `LICENSE`, issue templates.
+
+## v0.3 — 74 settings + range filters + budgets
+
+(Counter-era peak. Kept here for history; most of this UI is deliberately
+removed in v0.4.)
+
+- Schema-driven settings (74 entries, 10 sections, search, validation)
+- Range filters: today / 24h / 7d / week / month / 30d / 90d / custom
+- Budgets endpoint + tray-icon budget palette
+- Server-side range cache + client cache + boot prefetch
+
 ## v0.2 — 100 improvements across 5 parallel agents
 
 5 subagents dispatched in parallel, each owning a strict file domain (no
