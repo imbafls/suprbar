@@ -8,7 +8,7 @@
 #define MyAppName      "supr.bar"
 #define MyAppVersion   "0.4.0"
 #define MyAppPublisher "Omer Taji"
-#define MyAppURL       "https://github.com/omertaji/suprbar"
+#define MyAppURL       "https://github.com/imbafls/suprbar"
 #define MyAppExeName   "suprbar.exe"
 
 [Setup]

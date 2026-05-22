@@ -39,13 +39,13 @@ The cost number stays in the corner. It is not the point.
 ### From release (recommended)
 
 Download the latest `suprbar-setup.exe` from
-[Releases](https://github.com/omertaji/suprbar/releases), run it, done.
+[Releases](https://github.com/imbafls/suprbar/releases), run it, done.
 suprbar lives in your tray.
 
 ### From source
 
 ```sh
-git clone https://github.com/omertaji/suprbar
+git clone https://github.com/imbafls/suprbar
 cd suprbar
 pip install -r requirements.txt
 python -m suprbar
@@ -160,5 +160,5 @@ MIT. See [`LICENSE`](./LICENSE).
 ---
 
 <div align="center">
-<sub>Built by <a href="https://github.com/omertaji">@omertaji</a>. Not affiliated with Anthropic.</sub>
+<sub>Built by <a href="https://github.com/imbafls">@imbafls</a>. Not affiliated with Anthropic.</sub>
 </div>

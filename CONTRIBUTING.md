@@ -28,7 +28,7 @@ be new rules.**
 ## Setup
 
 ```sh
-git clone https://github.com/omertaji/suprbar
+git clone https://github.com/imbafls/suprbar
 cd suprbar
 python -m venv .venv
 .venv\Scripts\activate          # Windows
@@ -102,7 +102,7 @@ people who do that will be closed without further discussion.
 
 ## Where to ask
 
-- Discussions: [github.com/omertaji/suprbar/discussions](https://github.com/omertaji/suprbar/discussions)
+- Discussions: [github.com/imbafls/suprbar/discussions](https://github.com/imbafls/suprbar/discussions)
 - Issues: bugs and concrete feature requests only
 - Anything sensitive (security report, conduct concern): email the address
   in the repo `SECURITY.md`

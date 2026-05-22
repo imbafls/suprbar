@@ -110,7 +110,7 @@ def make_social_card(w: int = 1200, h: int = 630) -> Image.Image:
            fill=(140, 145, 160, 255))
     tag = load_bold_font(20)
     d.text((80, h - 80),
-           "MIT  ·  github.com/omertaji/suprbar",
+           "MIT  ·  github.com/imbafls/suprbar",
            font=tag,
            fill=(110, 115, 130, 255))
     return bg
