@@ -908,6 +908,124 @@ body.compact .range-tabs .rt { font-size: 10px; padding: 4px 0; }
 .cost.loading .cents { opacity: 0.4; }
 
 /* ────────────────────────────────────────────────────────────────────────
+   Coach hero observation — the real product. Sits above the range tabs.
+   ──────────────────────────────────────────────────────────────────────── */
+.coach-hero {
+  margin: 12px 12px 4px;
+  padding: 14px 16px 12px;
+  background: linear-gradient(180deg, rgba(91,141,239,0.10), rgba(91,141,239,0.02));
+  border: 1px solid rgba(91,141,239,0.28);
+  border-left: 3px solid var(--b-accent);
+  border-radius: 10px;
+  animation: heroIn 280ms ease-out;
+}
+.coach-hero.sev-info { border-left-color: var(--b-accent); }
+.coach-hero.sev-nudge {
+  border-left-color: var(--b-warn);
+  background: linear-gradient(180deg, rgba(251,191,36,0.10), rgba(251,191,36,0.02));
+  border-color: rgba(251,191,36,0.28);
+}
+.coach-hero.sev-warn {
+  border-left-color: var(--b-danger);
+  background: linear-gradient(180deg, rgba(248,113,113,0.12), rgba(248,113,113,0.02));
+  border-color: rgba(248,113,113,0.32);
+}
+@keyframes heroIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.coach-hero .ch-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 8px;
+}
+.coach-hero .ch-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--b-accent);
+  box-shadow: 0 0 6px var(--b-accent);
+}
+.coach-hero.sev-nudge .ch-dot { background: var(--b-warn); box-shadow: 0 0 6px var(--b-warn); }
+.coach-hero.sev-warn  .ch-dot { background: var(--b-danger); box-shadow: 0 0 6px var(--b-danger); }
+.coach-hero .ch-id { color: rgba(255,255,255,0.7); }
+.coach-hero .ch-conf {
+  margin-left: auto;
+  font-size: 9.5px; letter-spacing: 0;
+  color: rgba(255,255,255,0.45);
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.coach-hero .ch-title {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin-bottom: 6px;
+  line-height: 1.25;
+}
+.coach-hero .ch-body {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.coach-hero .ch-tip {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--b-accent-hot);
+  line-height: 1.5;
+}
+.coach-hero.sev-nudge .ch-tip { color: var(--b-warn); }
+.coach-hero.sev-warn  .ch-tip { color: var(--b-danger); }
+
+.ch-actions {
+  margin-top: 10px;
+  display: flex; gap: 6px;
+  -webkit-app-region: no-drag; app-region: no-drag;
+}
+
+/* When the coach is the hero, demote the cost number to a chip. */
+body.coach-mode .cost {
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.7);
+}
+body.coach-mode .cost .currency { font-size: 11px; }
+body.coach-mode .cost-eyebrow {
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+}
+body.coach-mode .cost-block { padding: 10px 18px 12px; }
+
+/* More-notes drawer */
+.more-notes {
+  margin: 0 12px 8px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.more-notes .mn-item {
+  padding: 4px 0;
+  display: flex; gap: 8px; align-items: baseline;
+}
+.more-notes .mn-item .mn-id {
+  color: rgba(255,255,255,0.4);
+  min-width: 80px;
+}
+.more-notes .mn-item .mn-title { color: var(--text); }
+
+/* ────────────────────────────────────────────────────────────────────────
    Settings — search + dynamic sections + controls
    ──────────────────────────────────────────────────────────────────────── */
 .settings-head-tools {

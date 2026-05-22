@@ -1096,6 +1096,84 @@ function renderBudget(b) {
 setInterval(loadBudgets, 30_000);
 loadBudgets();
 
+// ════════════════════════════════════════════════════════════════════════
+//  Coach: hero observation card
+// ════════════════════════════════════════════════════════════════════════
+
+let _lastCoachId = null;
+let _coachMore = [];
+
+async function loadCoach() {
+  try {
+    const r = await fetch('/api/coach', { cache: 'no-store' });
+    if (!r.ok) return;
+    renderCoach(await r.json());
+  } catch (e) { /* swallow */ }
+}
+
+function renderCoach(data) {
+  const hero = data?.hero;
+  const host = document.getElementById('coachHero');
+  if (!host) return;
+  if (!hero) {
+    host.hidden = true;
+    document.body.classList.remove('coach-mode');
+    return;
+  }
+  // Toggle "coach-mode" on body so the cost number demotes to a chip.
+  document.body.classList.add('coach-mode');
+  host.hidden = false;
+  host.classList.remove('sev-info','sev-nudge','sev-warn');
+  host.classList.add('sev-' + (hero.severity || 'info'));
+
+  const $set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  $set('chId',    hero.id);
+  $set('chConf',  Math.round(hero.confidence * 100) + '% confidence');
+  $set('chTitle', hero.title);
+  $set('chBody',  hero.body);
+
+  const tip = document.getElementById('chTip');
+  if (tip) {
+    if (hero.tip) { tip.textContent = 'Tip: ' + hero.tip; tip.hidden = false; }
+    else          { tip.hidden = true; tip.textContent = ''; }
+  }
+
+  // More-notes button (visible only if there are minor observations)
+  _coachMore = Array.isArray(data.more) ? data.more : [];
+  const moreWrap = document.getElementById('chMoreNotes');
+  if (moreWrap) {
+    moreWrap.hidden = _coachMore.length === 0;
+  }
+
+  // Toast on new observation id (only when it changes, never on first paint).
+  if (_lastCoachId !== null && hero.id !== _lastCoachId
+      && hero.severity !== 'info'
+      && typeof toast === 'function') {
+    toast(hero.title, hero.severity === 'warn' ? 'err' : 'warn', 3200);
+  }
+  _lastCoachId = hero.id;
+}
+
+// More-notes drawer (lightweight render — no permanent DOM)
+document.getElementById('chMoreBtn')?.addEventListener('click', () => {
+  let drawer = document.getElementById('coachMore');
+  if (drawer) { drawer.remove(); return; }
+  drawer = document.createElement('div');
+  drawer.id = 'coachMore';
+  drawer.className = 'more-notes';
+  drawer.innerHTML = _coachMore.map(o => `
+    <div class="mn-item">
+      <span class="mn-id">${o.id}</span>
+      <span class="mn-title">${o.title}</span>
+    </div>`).join('');
+  document.getElementById('coachHero').after(drawer);
+});
+
+// Poll the coach alongside the data poll. Coach refreshes are cheap because
+// they reuse the server-side today cache.
+setInterval(loadCoach, 5000);
+loadCoach();
+
 // ──── Apply display prefs to the DOM ────
 
 function applyDisplayPrefs(prefs) {

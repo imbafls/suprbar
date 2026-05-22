@@ -329,6 +329,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/prefs/schema":
             return self._send_json(200, _prefs_schema_payload())
 
+        if path == "/api/coach":
+            try:
+                from . import coach
+                return self._send_json(200, coach.run_engine())
+            except Exception as e:  # noqa: BLE001
+                return self._send_error(500, "coach_failed", str(e))
+
         return self._send_error(404, "not_found", f"no route {path}")
 
     def do_POST(self):
