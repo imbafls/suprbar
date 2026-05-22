@@ -164,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(encoded)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            # Client (WebView2 page navigation, F5, shutdown) closed mid-write.
             pass
 
     def _send_json(self, code: int, obj: dict, *, etag: str | None = None) -> None:
