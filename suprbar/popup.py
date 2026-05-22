@@ -65,19 +65,24 @@ def _state_path() -> Path:
 _state_lock = threading.Lock()
 
 
-def load_window_state() -> dict:
-    """Read persisted window state. Returns empty dict on any failure."""
+def _read_state_unlocked() -> dict:
+    """Read state without taking _state_lock. Caller must hold the lock."""
     p = _state_path()
     try:
         if not p.exists():
             return {}
-        with _state_lock:
-            raw = json.loads(p.read_text("utf-8"))
+        raw = json.loads(p.read_text("utf-8"))
         if isinstance(raw, dict):
             return raw
     except (OSError, json.JSONDecodeError) as e:
         log.debug("window-state load failed: %s", e)
     return {}
+
+
+def load_window_state() -> dict:
+    """Read persisted window state. Returns empty dict on any failure."""
+    with _state_lock:
+        return _read_state_unlocked()
 
 
 def save_window_state(patch: dict) -> None:
@@ -86,7 +91,7 @@ def save_window_state(patch: dict) -> None:
         d = _state_dir()
         d.mkdir(parents=True, exist_ok=True)
         with _state_lock:
-            cur = load_window_state()
+            cur = _read_state_unlocked()
             cur.update(patch)
             tmp = _state_path().with_suffix(".json.tmp")
             tmp.write_text(json.dumps(cur, indent=2), encoding="utf-8")
@@ -374,6 +379,16 @@ def _show_webview2_install_dialog() -> None:
 
 class TrayBridge:
     def __init__(self):
+        # Single-instance guard: if another suprbar already owns the named
+        # mutex, bail out *before* we open the webview / tray. Bypass via
+        # SUPRBAR_FORCE=1 for development. Constructing TrayBridge is the
+        # first thing __main__ does, so this is the earliest reliable hook.
+        if not acquire_single_instance():
+            sys.stderr.write(
+                "supr.bar already running (set SUPRBAR_FORCE=1 to override)\n"
+            )
+            sys.exit(0)
+
         self._window: webview.Window | None = None
         self._hwnd: int = 0
         self._visible = False
