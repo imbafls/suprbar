@@ -1,6 +1,14 @@
 # supr.bar CHANGELOG
 
-## v0.4 — pivot to coach (planned)
+## v0.5.0 — live session scan
+
+- Scans all Claude Code JSONL sessions touched within the live window (not just one).
+- Flyout **Live now** panel: project, model, cost, burn rate per active session.
+- Tray indicator shows `N live` when multiple sessions are running.
+- Drag performance fixes, refresh button, coach layer removed (usage bar focus).
+- Windows installer + portable zip via GitHub Release on tag.
+
+## v0.4 — coach experiment (reverted)
 
 **Direction change.** supr.bar pivots from a passive usage counter to an
 active coach. See `pivot_v1.md` for the full plan.

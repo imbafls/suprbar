@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>supr.bar — a coach in your tray, not a counter</title>
-  <meta name="description" content="A tray companion for Windows that watches your local Claude Code sessions and surfaces actionable observations. MIT-licensed, no telemetry.">
+  <title>supr.bar — API usage in your tray</title>
+  <meta name="description" content="Windows tray companion for Claude Code and API spend — cost, tokens, burn rate, budgets. MIT-licensed, no telemetry.">
   <meta property="og:title" content="supr.bar">
-  <meta property="og:description" content="A coach in your tray, not a counter.">
+  <meta property="og:description" content="API usage in your tray.">
   <meta property="og:image" content="./brand/social-card.png">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
@@ -132,14 +132,14 @@
         <a href="https://github.com/imbafls/suprbar">GitHub</a>
         <a href="https://github.com/imbafls/suprbar#install">Install</a>
         <a href="https://github.com/imbafls/suprbar/blob/main/docs/extending.md">Extend</a>
-        <a href="https://github.com/imbafls/suprbar/blob/main/pivot_v1.md">Roadmap</a>
+        <a href="https://github.com/imbafls/suprbar/blob/main/README.md#roadmap-high-level">Roadmap</a>
       </div>
     </nav>
 
     <header class="hero">
       <img class="mark" src="./brand/mark-256.png" alt="supr.bar logo">
-      <h1>A <span class="accent">coach</span> in your tray, not a counter.</h1>
-      <p class="tag">supr.bar watches your local Claude Code sessions and surfaces specific observations &mdash; when you're iterating in circles, when you're winning, when to stop. No login. No telemetry. Just your data, observed.</p>
+      <h1><span class="accent">API usage</span> in your tray.</h1>
+      <p class="tag">supr.bar reads your local Claude Code sessions and optional Anthropic Admin API data — spend, tokens, burn rate, and budget limits in a small flyout. CodexBar-style. No login. No telemetry.</p>
       <div class="cta-row">
         <a class="btn primary" href="https://github.com/imbafls/suprbar/releases">Download for Windows</a>
         <a class="btn" href="https://github.com/imbafls/suprbar">View on GitHub</a>
@@ -147,12 +147,12 @@
     </header>
 
     <section>
-      <h2>Example observation</h2>
-      <div class="observation">
-        <div class="meta">nudge · circling-in-cache · 0.81 confidence</div>
-        <h4>You're iterating in circles.</h4>
-        <p>73% of the last 30 minutes was cache reads with three rewrites of <code>popup.py</code>. Worth restating the constraint in a fresh prompt.</p>
-        <div class="tip">Tip: close the current message, write one sentence describing what "done" looks like, paste it as a new turn.</div>
+      <h2>Flyout preview</h2>
+      <div class="observation" style="border-left-color: var(--b-accent);">
+        <div class="meta" style="color: var(--b-accent);">today · claude code · live</div>
+        <h4>$12.47</h4>
+        <p>847 messages · opus 4.6 · $4.20/hr burn · 68% cache hit · daily budget 62%</p>
+        <div class="tip">Range tabs: today / 7d / 30d · per-source breakdown · CSV export</div>
       </div>
     </section>
 
@@ -161,33 +161,33 @@
       <div class="grid-3">
         <div class="card">
           <div class="icon"></div>
-          <h3>Live observations</h3>
-          <p>Six built-in rules watch your active session and surface notes when something changes &mdash; signal, not noise.</p>
+          <h3>Spend at a glance</h3>
+          <p>Equivalent API cost from local JSONL, plus optional Anthropic Admin API for org-wide actuals.</p>
         </div>
         <div class="card">
           <div class="icon"></div>
-          <h3>Session retros</h3>
-          <p>When a session goes idle, supr.bar drops a 3-bullet markdown summary into <code>~/.suprbar/sessions/</code>.</p>
+          <h3>Budgets &amp; alerts</h3>
+          <p>Daily, weekly, and monthly limits with tray color warnings when you approach the cap.</p>
         </div>
         <div class="card">
           <div class="icon"></div>
           <h3>Local only</h3>
-          <p>Reads <code>~/.claude/projects/**/*.jsonl</code> directly. Nothing leaves your machine.</p>
+          <p>Reads <code>~/.claude/projects/**/*.jsonl</code> directly. Nothing leaves your machine unless you enable the Admin API.</p>
         </div>
         <div class="card">
           <div class="icon"></div>
-          <h3>Write your own rule</h3>
-          <p>Drop a 30-line Python file into <code>~/.suprbar/rules/</code>. The coach picks it up at next launch.</p>
+          <h3>Multi-source (roadmap)</h3>
+          <p>Provider plugin shape is in place — Cursor, Codex CLI, and more sources coming next.</p>
         </div>
         <div class="card">
           <div class="icon"></div>
-          <h3>Tiny config</h3>
-          <p>Roughly a dozen settings. Themes, density, hotkeys, per-rule mute. That's it.</p>
+          <h3>Range filters</h3>
+          <p>Today, 24h, 7d, week, month, 30d, 90d — server-side cache for snappy tab switches.</p>
         </div>
         <div class="card">
           <div class="icon"></div>
           <h3>MIT-licensed</h3>
-          <p>Free for personal and commercial use. Fork it, ship a variant, name it whatever &mdash; we're flattered.</p>
+          <p>Free for personal and commercial use. Fork it, ship a variant.</p>
         </div>
       </div>
     </section>
@@ -206,35 +206,26 @@ python -m suprbar</pre>
     </section>
 
     <section>
-      <h2>Write a rule in 30 lines</h2>
-      <pre><span style="color:#c084fc">from</span> suprbar.coach.rule <span style="color:#c084fc">import</span> Observation, Rule
-
-
-<span style="color:#c084fc">class</span> LongMessage(Rule):
-    id          = <span style="color:#86efac">"long-message"</span>
-    name        = <span style="color:#86efac">"Long prompt"</span>
-    description = <span style="color:#86efac">"Nudges when the last message is over 4k chars."</span>
-
-    <span style="color:#c084fc">def</span> evaluate(self, ctx):
-        last = ctx.recent_user_messages(limit=1)
-        <span style="color:#c084fc">if not</span> last <span style="color:#c084fc">or</span> len(last[0].text) &lt; 4_000:
-            <span style="color:#c084fc">return None</span>
-        <span style="color:#c084fc">return</span> Observation(
-            id=self.id, severity=<span style="color:#86efac">"info"</span>, confidence=0.7,
-            title=<span style="color:#86efac">"Long prompt"</span>,
-            body=f<span style="color:#86efac">"Your last message was {len(last[0].text):,} chars. "</span>
-                 <span style="color:#86efac">"Long prompts often hide multiple asks."</span>,
-            tip=<span style="color:#86efac">"Split into two turns: state the constraint, then the change."</span>,
-        )</pre>
-      <p>Drop it in <code>suprbar/coach/rules/</code> or <code>~/.suprbar/rules/</code>. Restart. <a href="https://github.com/imbafls/suprbar/blob/main/docs/extending.md">Full extension guide</a>.</p>
+      <h2>Add a data source</h2>
+      <pre><span style="color:#c084fc"># suprbar/providers/cursor.py</span>
+<span style="color:#c084fc">def</span> today_summary():
+    <span style="color:#c084fc">return</span> {
+        <span style="color:#86efac">"id"</span>: <span style="color:#86efac">"cursor"</span>,
+        <span style="color:#86efac">"label"</span>: <span style="color:#86efac">"Cursor · local"</span>,
+        <span style="color:#86efac">"ok"</span>: True,
+        <span style="color:#86efac">"cost_today"</span>: 0.0,
+        <span style="color:#86efac">"tokens_today"</span>: {<span style="color:#86efac">"input"</span>: 0, <span style="color:#86efac">"output"</span>: 0, ...},
+        ...
+    }</pre>
+      <p>Register in <code>aggregator.py</code> and add a config toggle. <a href="https://github.com/imbafls/suprbar/blob/main/docs/extending.md">Full extension guide</a>.</p>
     </section>
 
     <section>
       <h2>Philosophy</h2>
-      <p><b>Observe, don't nag.</b> Severity tops out at <code>warn</code> and never blocks.</p>
-      <p><b>Your data stays local.</b> Zero phone-home. Anthropic Admin API integration is opt-in only.</p>
-      <p><b>Plain text wins.</b> Session retros are markdown files in a folder.</p>
-      <p><b>Extension over configuration.</b> The settings panel is intentionally small. If you need more, write a rule.</p>
+      <p><b>Numbers you can act on.</b> Spend, limits, burn rate — not theatre metrics.</p>
+      <p><b>Your data stays local.</b> Zero phone-home. Admin API is opt-in only.</p>
+      <p><b>Multi-tool by design.</b> One flyout, many sources — Claude Code today, more AIs tomorrow.</p>
+      <p><b>Extension over bloat.</b> New tools = new provider module, not a settings explosion.</p>
     </section>
 
     <footer>

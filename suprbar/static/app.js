@@ -135,6 +135,45 @@ function paintCost(v) {
   const cEl = $('costCents'); if (cEl) cEl.textContent = cents;
 }
 
+function shortProject(name) {
+  if (!name) return '—';
+  return name.length > 30 ? name.slice(0, 29) + '…' : name;
+}
+
+function renderLiveSessions(d) {
+  const wrap = document.getElementById('liveSessions');
+  const list = document.getElementById('liveSessionList');
+  const countEl = document.getElementById('liveCount');
+  if (!wrap || !list) return;
+
+  const sessions = Array.isArray(d.live_sessions) ? d.live_sessions : [];
+  if (!sessions.length) {
+    wrap.hidden = true;
+    list.innerHTML = '';
+    if (countEl) countEl.textContent = '0';
+    return;
+  }
+
+  wrap.hidden = false;
+  if (countEl) countEl.textContent = String(sessions.length);
+  list.innerHTML = sessions.slice(0, 4).map((s, i) => {
+    const burn = Number(s.burn_rate_usd_per_hour || 0);
+    const burnTxt = burn > 0 ? `$${burn.toFixed(2)}/h` : '—';
+    const rowCls = i === 0 ? 'live-row primary' : 'live-row';
+    return `<div class="${rowCls}" title="${escapeAttr(s.path || s.project || '')}">
+      <div class="live-row-main">
+        <span class="live-proj">${escape(shortProject(s.project))}</span>
+        <span class="live-cost">$${Number(s.cost_today || 0).toFixed(2)}</span>
+      </div>
+      <div class="live-row-meta">
+        <span>${escape(shortModel(s.model))}</span>
+        <span>${Number(s.messages_today || 0).toLocaleString()} msgs</span>
+        <span>${burnTxt}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // ───────────────────────── Render ─────────────────────────
 
 function render(d) {
@@ -221,23 +260,33 @@ function render(d) {
     cacheHitEl.textContent = totalIn > 0 ? hit.toFixed(0) + '%' : '—';
   }
 
+  // Live sessions panel (all JSONL touched within live window)
+  renderLiveSessions(d);
+
   // Active vs Idle
+  const liveSessions = Array.isArray(d.live_sessions) ? d.live_sessions : [];
+  const nLive = liveSessions.length;
   const live = $('liveIndicator');
-  if (active) {
+  if (active || nLive > 0) {
     if (live) {
       live.hidden = false;
       live.classList.remove('dim');
-      live.innerHTML = '<span class="pulse-dot"></span>session live';
+      if (nLive > 1) {
+        live.innerHTML = `<span class="pulse-dot"></span>${nLive} live`;
+      } else {
+        live.innerHTML = '<span class="pulse-dot"></span>session live';
+      }
     }
     const mr = $('metricRow'); if (mr) mr.hidden = false;
     const es = $('emptyState'); if (es) es.hidden = true;
 
-    setT('mMessages', (active.messages_today ?? 0).toLocaleString());
-    setT('mModel', shortModel(active.model));
-    startedAt = active.started_at ? new Date(active.started_at) : null;
+    const head = active || liveSessions[0] || null;
+    setT('mMessages', (head?.messages_today ?? 0).toLocaleString());
+    setT('mModel', shortModel(head?.model));
+    startedAt = head?.started_at ? new Date(head.started_at) : null;
     updateStartedDisplay();
 
-    const proj = active.project || '~/.claude';
+    const proj = head?.project || '~/.claude';
     setT('footMeta', proj.length > 36 ? proj.slice(0, 35) + '…' : proj);
   } else {
     if (live) {
@@ -248,14 +297,15 @@ function render(d) {
     const mr = $('metricRow'); if (mr) mr.hidden = true;
     const es = $('emptyState'); if (es) es.hidden = false;
     startedAt = null;
+    const scanHint = d.scan_source ? d.scan_source.replace(/^.*[\\/]/, '…/') : '~/.claude';
     if (d.last_session_seen) {
       const last = new Date(d.last_session_seen.last_activity);
       const ago = (Date.now() - last.getTime()) / 1000;
       setT('emptySub', `last seen ${fmtAgo(ago)}`);
     } else {
-      setT('emptySub', 'watching ~/.claude');
+      setT('emptySub', `watching ${scanHint}`);
     }
-    setT('footMeta', 'watching ~/.claude');
+    setT('footMeta', `watching ${scanHint}`);
   }
 
   // Optional projects list (#projectsList / #projectsListItems may be added)
@@ -463,6 +513,37 @@ function syncPinButton(on) {
 $('settingsBtn')?.addEventListener('click', openSettings);
 $('settingsCloseBtn')?.addEventListener('click', closeSettings);
 
+async function triggerRefresh() {
+  const btn = $('refreshBtn');
+  if (btn?.classList.contains('loading')) return;
+  btn?.classList.add('loading');
+  btn?.setAttribute('aria-busy', 'true');
+  toast('refreshing…', 'ok', 900);
+  try {
+    await load({ refresh: true });
+  } finally {
+    btn?.classList.remove('loading');
+    btn?.setAttribute('aria-busy', 'false');
+  }
+}
+
+$('refreshBtn')?.addEventListener('click', triggerRefresh);
+
+// Drop heavy effects while the native window is being dragged.
+function bindWindowDragPerf() {
+  const dragSel = '.flyout-head, .cost-eyebrow, .settings-head';
+  const onDown = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, select, textarea, a, [role="button"]')) return;
+    document.body.classList.add('window-dragging');
+  };
+  const onUp = () => document.body.classList.remove('window-dragging');
+  document.querySelectorAll(dragSel).forEach(el => el.addEventListener('mousedown', onDown));
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('blur', onUp);
+}
+bindWindowDragPerf();
+
 $('pinBtn')?.addEventListener('click', async () => {
   const next = !$('pinBtn').classList.contains('on');
   syncPinButton(next);
@@ -640,7 +721,7 @@ function openCtxMenu(x, y) {
   const pinned = $('pinBtn')?.classList.contains('on');
   const items = [
     { label: 'Settings',       fn: openSettings },
-    { label: 'Refresh',        fn: () => { load({ refresh: true }); toast('refreshing…', 'ok', 900); } },
+    { label: 'Refresh',        fn: () => { triggerRefresh(); } },
     { label: pinned ? 'Unpin' : 'Pin', fn: () => $('pinBtn')?.click() },
     { label: 'Quit',           fn: () => fetch('/api/quit', { method: 'POST' }) },
   ];
@@ -703,8 +784,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+R or F5 → refresh (#7)
   if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
     e.preventDefault();
-    toast('refreshing…', 'ok', 900);
-    load({ refresh: true });
+    triggerRefresh();
     return;
   }
   // Ctrl+E → CSV export (#5)
@@ -1015,6 +1095,7 @@ function renderRangeData(d) {
   if (lbl) lbl.textContent = (d.range?.label ? d.range.label[0].toUpperCase() + d.range.label.slice(1) : currentRange) + ' · Claude Code';
 
   // hide live indicator, hide active metric row, show summary metrics in its place
+  document.getElementById('liveSessions')?.setAttribute('hidden', '');
   const live = document.getElementById('liveIndicator');
   if (live) { live.hidden = false; live.classList.add('dim'); live.textContent = `${t.sessions} sess · ${t.projects} proj`; }
 
@@ -1095,84 +1176,6 @@ function renderBudget(b) {
 
 setInterval(loadBudgets, 30_000);
 loadBudgets();
-
-// ════════════════════════════════════════════════════════════════════════
-//  Coach: hero observation card
-// ════════════════════════════════════════════════════════════════════════
-
-let _lastCoachId = null;
-let _coachMore = [];
-
-async function loadCoach() {
-  try {
-    const r = await fetch('/api/coach', { cache: 'no-store' });
-    if (!r.ok) return;
-    renderCoach(await r.json());
-  } catch (e) { /* swallow */ }
-}
-
-function renderCoach(data) {
-  const hero = data?.hero;
-  const host = document.getElementById('coachHero');
-  if (!host) return;
-  if (!hero) {
-    host.hidden = true;
-    document.body.classList.remove('coach-mode');
-    return;
-  }
-  // Toggle "coach-mode" on body so the cost number demotes to a chip.
-  document.body.classList.add('coach-mode');
-  host.hidden = false;
-  host.classList.remove('sev-info','sev-nudge','sev-warn');
-  host.classList.add('sev-' + (hero.severity || 'info'));
-
-  const $set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-  $set('chId',    hero.id);
-  $set('chConf',  Math.round(hero.confidence * 100) + '% confidence');
-  $set('chTitle', hero.title);
-  $set('chBody',  hero.body);
-
-  const tip = document.getElementById('chTip');
-  if (tip) {
-    if (hero.tip) { tip.textContent = 'Tip: ' + hero.tip; tip.hidden = false; }
-    else          { tip.hidden = true; tip.textContent = ''; }
-  }
-
-  // More-notes button (visible only if there are minor observations)
-  _coachMore = Array.isArray(data.more) ? data.more : [];
-  const moreWrap = document.getElementById('chMoreNotes');
-  if (moreWrap) {
-    moreWrap.hidden = _coachMore.length === 0;
-  }
-
-  // Toast on new observation id (only when it changes, never on first paint).
-  if (_lastCoachId !== null && hero.id !== _lastCoachId
-      && hero.severity !== 'info'
-      && typeof toast === 'function') {
-    toast(hero.title, hero.severity === 'warn' ? 'err' : 'warn', 3200);
-  }
-  _lastCoachId = hero.id;
-}
-
-// More-notes drawer (lightweight render — no permanent DOM)
-document.getElementById('chMoreBtn')?.addEventListener('click', () => {
-  let drawer = document.getElementById('coachMore');
-  if (drawer) { drawer.remove(); return; }
-  drawer = document.createElement('div');
-  drawer.id = 'coachMore';
-  drawer.className = 'more-notes';
-  drawer.innerHTML = _coachMore.map(o => `
-    <div class="mn-item">
-      <span class="mn-id">${o.id}</span>
-      <span class="mn-title">${o.title}</span>
-    </div>`).join('');
-  document.getElementById('coachHero').after(drawer);
-});
-
-// Poll the coach alongside the data poll. Coach refreshes are cheap because
-// they reuse the server-side today cache.
-setInterval(loadCoach, 5000);
-loadCoach();
 
 // ──── Apply display prefs to the DOM ────
 

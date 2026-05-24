@@ -16,6 +16,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageFont
 
 from . import config, server
+from . import __version__
 from .popup import TrayBridge
 
 log = logging.getLogger("suprbar.tray")
@@ -262,7 +263,7 @@ class TrayApp:
         try:
             if self._icon:
                 self._icon.notify(
-                    "supr.bar v0.1",
+                    f"supr.bar v{__version__}",
                     "Tray app for Claude Code usage",
                 )
         except Exception:
