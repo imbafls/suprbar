@@ -1,8 +1,8 @@
 # PyInstaller spec for supr.bar — produces dist/suprbar/suprbar.exe
 # Run:  pyinstaller --clean suprbar.spec
 #
-# Output is a *one-folder* bundle (faster startup than --onefile, easier to
-# wrap with Inno Setup). The folder gets shipped via installer.iss.
+# Entry point is suprbar_main.py (not suprbar/__main__.py) so relative
+# imports work when frozen. Dev still uses: pythonw -m suprbar
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
@@ -10,6 +10,7 @@ block_cipher = None
 
 # Pull in everything pywebview / pystray load lazily.
 hidden_imports = []
+hidden_imports += collect_submodules("suprbar")
 hidden_imports += collect_submodules("webview")
 hidden_imports += collect_submodules("pystray")
 
@@ -18,7 +19,7 @@ datas = []
 datas += [("suprbar/static", "suprbar/static")]
 
 a = Analysis(
-    ["suprbar/__main__.py"],
+    ["suprbar_main.py"],
     pathex=["."],
     binaries=[],
     datas=datas,

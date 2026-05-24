@@ -1,5 +1,11 @@
 # supr.bar CHANGELOG
 
+## v0.5.1 — exe startup fix
+
+- Fix PyInstaller entry point (`suprbar_main.py`) so the Windows exe no longer
+  crashes with `ImportError: attempted relative import with no known parent package`.
+- Bundle now collects all `suprbar` submodules explicitly.
+
 ## v0.5.0 — live session scan
 
 - Scans all Claude Code JSONL sessions touched within the live window (not just one).
