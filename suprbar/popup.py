@@ -403,6 +403,11 @@ class TrayBridge:
         # Settings-open hint passed via URL hash. The frontend reads
         # location.hash on load to decide whether to jump to settings.
         self._open_settings_next_show = False
+        # Debounce window-position writes during drag (was syncing JSON every
+        # moved event — that stuttered badly on Win11 WebView2).
+        self._pending_pos: tuple[int, int] | None = None
+        self._move_save_timer: threading.Timer | None = None
+        self._move_save_delay = 0.35
 
     def attach_window(self, w: webview.Window) -> None:
         self._window = w
@@ -427,7 +432,8 @@ class TrayBridge:
     def _decorate(self) -> None:
         hwnd = self._resolve_hwnd()
         _apply_dwm_round(hwnd)
-        _apply_mica_backdrop(hwnd)
+        # Mica/backdrop blur during HWND drag makes WebView2 repaint lag badly;
+        # rounded corners only.
         _hide_from_taskbar(hwnd)
 
     def _resolve_show_xy(self) -> tuple[int, int]:
@@ -556,20 +562,33 @@ class TrayBridge:
     # ---- callbacks invoked from webview event handlers ----
 
     def on_moved(self, x: int, y: int) -> None:
-        """Persist new position; snap to corner if close to one."""
+        """Remember position while dragging; persist after motion settles."""
         try:
-            snapped = _snap_to_corner(int(x), int(y))
-            if snapped != (int(x), int(y)) and self._window is not None:
-                try:
-                    self._window.move(*snapped)
-                except Exception as e:
-                    log.debug("snap move failed: %s", e)
-                sx, sy = snapped
-            else:
-                sx, sy = int(x), int(y)
-            save_window_state({"x": sx, "y": sy, "w": WIN_W, "h": WIN_H})
+            self._pending_pos = (int(x), int(y))
+            self._schedule_pos_save()
         except Exception as e:
             log.debug("on_moved failed: %s", e)
+
+    def _schedule_pos_save(self) -> None:
+        if self._move_save_timer is not None:
+            try:
+                self._move_save_timer.cancel()
+            except Exception:
+                pass
+        t = threading.Timer(self._move_save_delay, self._flush_pos_save)
+        t.daemon = True
+        self._move_save_timer = t
+        t.start()
+
+    def _flush_pos_save(self) -> None:
+        pos = self._pending_pos
+        if pos is None:
+            return
+        try:
+            sx, sy = _snap_to_corner(pos[0], pos[1])
+            save_window_state({"x": sx, "y": sy, "w": WIN_W, "h": WIN_H})
+        except Exception as e:
+            log.debug("pos save failed: %s", e)
 
 
 # ---------- JS bridge exposed to the popup ----------
@@ -622,7 +641,10 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         x=x,
         y=y,
         frameless=True,
-        easy_drag=False,
+        # Whole-window drag via WebView2; interactive controls opt out in CSS
+        # (-webkit-app-region: no-drag). Without this, only .flyout-head drags
+        # and often does not move the HWND at all on Win11.
+        easy_drag=True,
         resizable=False,
         on_top=on_top,
         hidden=True,

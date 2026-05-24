@@ -132,6 +132,26 @@ def _serialize(b: dict) -> dict:
     }
 
 
+def _live_session_payload(s: dict, now: datetime) -> dict[str, Any]:
+    """Public-facing summary for one session file within the live window."""
+    burn = 0.0
+    if s.get("first_ts"):
+        secs = max((now - s["first_ts"].astimezone()).total_seconds(), 1.0)
+        burn = s["cost_today"] / (secs / 3600.0)
+    return {
+        "id": s["id"],
+        "project": s["project"],
+        "path": s["path"],
+        "started_at": s["first_ts"].isoformat() if s.get("first_ts") else None,
+        "last_activity": s["last_ts"].isoformat(),
+        "live": True,
+        "model": s["model"],
+        "cost_today": round(s["cost_today"], 4),
+        "messages_today": s["msgs_today"],
+        "burn_rate_usd_per_hour": round(burn, 4),
+    }
+
+
 # ---------- per-file scan worker ----------
 
 def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
@@ -407,19 +427,28 @@ def today_summary() -> dict[str, Any]:
                 "today": _serialize(result["sess_today_fields"]),
             }
 
-    # Find the active session: most-recent mtime + within live window
+    # Find live sessions: any JSONL touched within the live window.
+    try:
+        from . import config as _cfg
+        live_window = _cfg.live_threshold_seconds()
+    except Exception:
+        live_window = LIVE_WINDOW_SECONDS
+
+    now_ts = time.time()
+    live_sessions: list[dict[str, Any]] = []
+    for s in sessions.values():
+        if now_ts - s["mtime"] > live_window:
+            continue
+        if s["msgs_today"] <= 0:
+            continue
+        live_sessions.append(_live_session_payload(s, now))
+    live_sessions.sort(key=lambda x: -x["cost_today"])
+
     active = None
-    if sessions:
-        latest = max(sessions.values(), key=lambda s: s["mtime"])
-        age = time.time() - latest["mtime"]
-        # Read live-window from config so the user setting actually applies.
-        try:
-            from . import config as _cfg
-            live_window = _cfg.live_threshold_seconds()
-        except Exception:
-            live_window = LIVE_WINDOW_SECONDS
-        if age <= live_window:
-            active = latest
+    if live_sessions:
+        head = live_sessions[0]
+        raw = sessions.get(head["id"])
+        active = {**head, "today": raw["today"]} if raw else head
 
     # If no live session, find the most recently active one (for "last seen")
     last_seen_session = None
@@ -489,28 +518,11 @@ def today_summary() -> dict[str, Any]:
         "sessions_today": sessions_today,
         "projects_today": projects_today,
         "top_model_today": top_model_today,
+        "live_sessions": live_sessions,
     }
 
     if active:
-        # burn rate (USD/hr) for the live session
-        burn = 0.0
-        if active["first_ts"]:
-            secs = max((now - active["first_ts"].astimezone()).total_seconds(),
-                       1.0)
-            burn = active["cost_today"] / (secs / 3600.0)
-        out["active"] = {
-            "id": active["id"],
-            "project": active["project"],
-            "path": active["path"],
-            "started_at": active["first_ts"].isoformat() if active["first_ts"] else None,
-            "last_activity": active["last_ts"].isoformat(),
-            "live": True,
-            "model": active["model"],
-            "cost_today": round(active["cost_today"], 4),
-            "messages_today": active["msgs_today"],
-            "burn_rate_usd_per_hour": round(burn, 4),
-            "today": active["today"],
-        }
+        out["active"] = active
     elif last_seen_session:
         out["last_session_seen"] = {
             "last_activity": last_seen_session["last_ts"].isoformat(),
@@ -546,6 +558,7 @@ def _empty_today(started_at: float, files_scanned: int) -> dict[str, Any]:
         "sessions_today": 0,
         "projects_today": 0,
         "top_model_today": None,
+        "live_sessions": [],
     }
 
 

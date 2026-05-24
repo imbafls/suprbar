@@ -105,7 +105,7 @@ def make_social_card(w: int = 1200, h: int = 630) -> Image.Image:
     sub_f = load_bold_font(28)
     d.text((80, 240), "supr.bar", font=title, fill=(244, 245, 247, 255))
     d.text((80, 320),
-           "a coach in your tray, not a counter.",
+           "API usage in your tray.",
            font=sub_f,
            fill=(140, 145, 160, 255))
     tag = load_bold_font(20)

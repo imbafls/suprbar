@@ -119,7 +119,11 @@ def today() -> dict[str, Any]:
 
     # Parse errors surfaced across sources (so the UI / diagnostics
     # endpoint can flag malformed JSONL without rooting around).
+    live_sessions: list[dict[str, Any]] = list(
+        local_extras.get("live_sessions", []) or []
+    )
     parse_errors = int(local_extras.get("parse_errors", 0) or 0)
+    scan_source = str(scanner.CLAUDE_HOME)
 
     elapsed_ms = int((time.time() - started) * 1000)
     # Cache meta from the scanner — same data, surfaced at top level so
@@ -145,7 +149,9 @@ def today() -> dict[str, Any]:
         },
         "sources": sources_data,
         "active": active,
+        "live_sessions": live_sessions,
         "last_session_seen": last_session_seen,
+        "scan_source": scan_source,
         # Additive: rich breakdowns + diagnostics.
         "by_project": by_project,
         "by_model": by_model,

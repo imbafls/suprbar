@@ -12,7 +12,7 @@ file required.
 
 - Display: `supr.bar`
 - Repo-safe: `suprbar` (no dot, lowercase)
-- Sentence usage: "supr.bar watches your sessions and surfaces notes."
+- Sentence usage: "supr.bar shows your API spend in the tray."
 
 Never `Suprbar`, `Supr.Bar`, `SUPR.BAR`, or `SuperBar`.
 
@@ -20,20 +20,19 @@ Never `Suprbar`, `Supr.Bar`, `SUPR.BAR`, or `SuperBar`.
 
 ## Tagline
 
-**A coach in your tray, not a counter.**
+**API usage in your tray.**
 
 Short alt (≤ 30 chars for social cards):
 
-- "Watch your sessions."
-- "Notice your patterns."
-- "Not just a counter."
+- "Spend in your tray."
+- "Local API usage bar."
+- "CodexBar for Windows."
 
 One-paragraph descriptor (use on the GitHub repo "About" and the site hero):
 
-> supr.bar is a tray companion that watches your local Claude Code sessions
-> and surfaces specific observations — when you're iterating in circles,
-> when you're winning, when to stop. No login. No telemetry. Just your data,
-> observed.
+> supr.bar is a Windows tray companion that shows Claude Code and API spend
+> from local session logs — cost, tokens, burn rate, and budgets. No login.
+> No telemetry. Your data stays on your machine.
 
 ---
 
@@ -57,10 +56,8 @@ Sizes shipped in repo:
 - 256 (PyInstaller .exe icon, app stores)
 - 1024 (social cards, README hero)
 
-When the active session has a coach observation of severity `warn`, the
-mark recolors to `--b-warn → #f59e0b`. For `nudge` it stays default. The
-`Severity → Palette` map is documented in `BRAND.md` so contributors can
-ship matching theme variants.
+When a budget limit is exceeded, the tray mark can recolor to `--b-danger`.
+The budget palette is documented in `suprbar/tray.py`.
 
 ---
 

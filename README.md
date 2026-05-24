@@ -4,35 +4,29 @@
 
 # supr.bar
 
-**A coach in your tray, not a counter.**
+**API usage in your tray.**
 
-A tray companion for Windows 11 that watches your local Claude Code sessions
-and surfaces specific, actionable observations — when you're iterating in
-circles, when you're winning, when to stop.
+A Windows 11 tray companion that reads your local Claude Code sessions (and
+optional Anthropic Admin API data) and shows spend, limits, and burn rate in a
+small flyout — CodexBar-style, local-first.
 
-No login. No telemetry. Just your data, observed.
+No login. No telemetry. Your data stays on your machine.
 
 </div>
 
 ---
 
-> **Status:** v0.4-dev. The legacy "usage counter" flyout still works and
-> ships in releases; the **coach** rules engine is being built in parallel.
-> See [`pivot_v1.md`](./pivot_v1.md) for the plan and
-> [`CHANGELOG.md`](./CHANGELOG.md) for history.
+> **Status:** v0.5-dev — usage counter / dashboard. Coach experiment removed;
+> focus is multi-source spend tracking and budgets.
 
 ## What it does
 
-- Reads `~/.claude/projects/**/*.jsonl` — no API key, no cloud.
-- Runs a small set of **rules** against each live session.
-- When a rule fires, drops the observation into the tray flyout:
-  > **You're iterating in circles.**
-  > 73 % of the last 30 minutes was cache reads with three rewrites of
-  > `popup.py`. Worth restating the constraint in a fresh prompt.
-- When the session goes idle, writes a 3-bullet markdown retro to
-  `~/.suprbar/sessions/<date>.md`.
-
-The cost number stays in the corner. It is not the point.
+- Reads `~/.claude/projects/**/*.jsonl` — no API key required for local mode.
+- Optional **Anthropic Admin API** for org-wide actual spend (Settings → Sources).
+- **Range filters** — today, 24h, 7d, week, month, 30d, 90d.
+- **Budgets** — daily / weekly / monthly limits with tray warnings.
+- **Per-source breakdown** — local Claude Code vs Admin API (more sources planned).
+- Live session indicator, burn rate, cache stats, top projects.
 
 ## Install
 
@@ -40,7 +34,6 @@ The cost number stays in the corner. It is not the point.
 
 Download the latest `suprbar-setup.exe` from
 [Releases](https://github.com/imbafls/suprbar/releases), run it, done.
-suprbar lives in your tray.
 
 ### From source
 
@@ -51,106 +44,51 @@ pip install -r requirements.txt
 python -m suprbar
 ```
 
-Requires Python 3.11+, Windows 11 (Win10 should work but is not the primary
-target), and a WebView2 runtime (preinstalled on Win11).
+Requires Python 3.11+, Windows 11, and WebView2 (preinstalled on Win11).
 
 ## Quick start
 
-1. Launch suprbar. A gradient "S" appears in your system tray.
+1. Launch suprbar — gradient **S** in the system tray.
 2. Open Claude Code and start a session.
-3. Click the tray icon to see the live flyout.
-4. Right-click → Settings to tweak refresh, theme, hotkeys.
-5. After your next session ends, find the retro at
-   `%USERPROFILE%\.suprbar\sessions\<date>.md`.
+3. Click the tray icon for the flyout (cost, tokens, burn, budgets).
+4. Right-click → **Settings** for refresh, theme, sources, budgets.
+5. Set daily/weekly/monthly limits under **Budgets** if you want warnings.
 
-## How it works
+## Architecture
 
 ```
-~/.claude/projects/*.jsonl
-        │
-        ▼
- ┌─────────────────┐
- │  scanner.py     │  incremental, mtime-keyed, parallel pool
- └────────┬────────┘
-          ▼
- ┌─────────────────┐
- │ coach/context   │  rolling 7-day stats + active session
- └────────┬────────┘
-          ▼
- ┌─────────────────┐
- │ coach/engine    │  run all Rules, pick the highest-confidence one
- └────────┬────────┘
-          ▼
- ┌─────────────────┐
- │  WebView2 popup │  hero observation + small cost chip
- └─────────────────┘
+~/.claude/projects/*.jsonl          Anthropic Admin API (optional)
+        │                                      │
+        ▼                                      ▼
+ ┌─────────────┐                      ┌──────────────────┐
+ │ providers/  │                      │ providers/       │
+ │ local.py    │                      │ anthropic_api.py │
+ └──────┬──────┘                      └────────┬─────────┘
+        │                                      │
+        └──────────────┬───────────────────────┘
+                       ▼
+              ┌─────────────────┐
+              │  aggregator.py  │  merge sources → /api/today
+              └────────┬────────┘
+                       ▼
+              ┌─────────────────┐
+              │  WebView2 popup │  cost hero + range tabs + budgets
+              └─────────────────┘
 ```
 
-Every observation is the output of a small Python class that subclasses
-`Rule` and lives in `suprbar/coach/rules/`. Rules are discovered at boot.
-See [`docs/extending.md`](./docs/extending.md) to write one.
-
-## Writing a rule (under 30 lines)
-
-```python
-# suprbar/coach/rules/my_rule.py
-from suprbar.coach.rule import Observation, Rule
-
-class LongMessage(Rule):
-    id = "long-message"
-    name = "Very long message"
-    description = "Nudges when the last user message exceeds 4k chars."
-
-    def evaluate(self, ctx):
-        last = ctx.recent_user_messages(limit=1)
-        if not last:
-            return None
-        msg = last[0]
-        if len(msg.text) < 4_000:
-            return None
-        return Observation(
-            id=self.id, severity="info", confidence=0.7,
-            title="Long prompt",
-            body=f"Your last message was {len(msg.text):,} chars. "
-                 "Long prompts often hide multiple asks.",
-            tip="Split into two turns: state the constraint, then the change.",
-        )
-```
-
-Drop the file. Restart suprbar. The rule is live. Toggle it in
-Settings → Coach.
-
-## Philosophy
-
-- **Observe, don't nag.** Severity tops out at `warn`; supr.bar never
-  blocks, modals, or beeps unless you ask.
-- **Your data stays local.** Zero phone-home. Anthropic Admin API is opt-in
-  only.
-- **Plain text wins.** Session retros are markdown files in a folder. No
-  database, no proprietary format.
-- **Extension over configuration.** The setting panel is small; rules are
-  small; if you need more, write a rule.
+Adding a new AI/tool = implement a provider in `suprbar/providers/` and
+register it in `aggregator.py`. See [`docs/extending.md`](./docs/extending.md).
 
 ## Roadmap (high-level)
 
-See [`pivot_v1.md`](./pivot_v1.md) for detail.
-
-- **v0.4 — coach v0** · 6 built-in rules, session wraps
-- **v0.5 — extension surface** · rule template, docs, first external rule
-- **v0.6 — receipt artifact** · session-card PNG, one-click copy
-- **v0.7 — patterns** · weekly Sunday-night summary
-- **v1.0 — cross-platform** · macOS + Linux popup ports
+- **v0.5** — strip coach; tighten usage-bar UX; source tabs in flyout
+- **v0.6** — Cursor / Codex CLI local log providers
+- **v0.7** — unified multi-source totals + per-source filters
+- **v1.0** — macOS + Linux tray ports
 
 ## Contributing
 
-PRs welcome on any of:
-
-- New rules (the most useful contribution surface).
-- Themes (`suprbar/static/themes/*.css`).
-- Data sources beyond local JSONL.
-- Translations of observation copy.
-- Bug reports with a session JSONL excerpt that reproduces the issue.
-
+PRs welcome: new **data sources**, themes, bug fixes, docs.
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## License

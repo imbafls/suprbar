@@ -71,6 +71,7 @@ def today_summary() -> dict[str, Any]:
             "sessions_today": raw.get("sessions_today", 0),
             "projects_today": raw.get("projects_today", 0),
             "top_model_today": raw.get("top_model_today"),
+            "live_sessions": raw.get("live_sessions", []),
         },
     }
 
