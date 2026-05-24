@@ -16,7 +16,7 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.5-dev — usage counter / dashboard. Coach experiment removed;
+> **Status:** v0.6 — usage command center. Coach experiment removed;
 > focus is multi-source spend tracking and budgets.
 
 ## What it does
@@ -81,7 +81,7 @@ register it in `aggregator.py`. See [`docs/extending.md`](./docs/extending.md).
 
 ## Roadmap (high-level)
 
-- **v0.5** — strip coach; tighten usage-bar UX; source tabs in flyout
+- **v0.6** — impact insights, provider cards, live/session controls, usability polish
 - **v0.6** — Cursor / Codex CLI local log providers
 - **v0.7** — unified multi-source totals + per-source filters
 - **v1.0** — macOS + Linux tray ports

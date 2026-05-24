@@ -134,24 +134,34 @@ def today() -> dict[str, Any]:
         scan_meta = {"files_reused": 0, "files_reparsed": 0,
                      "last_scan_ms": 0, "parse_errors": 0}
 
+    today_payload = {
+        "cost": round(total_cost, 4),
+        "messages": int(total_messages),
+        **{k: int(v) for k, v in total_tokens.items()},
+        "cache_hit_ratio": round(cache_hit_ratio, 4),
+        "cache_savings_usd": round(cache_savings_usd, 4),
+        "projects_today": projects_today,
+        "sessions_today": sessions_today,
+        "top_model_today": top_model_today,
+    }
+
     return {
         "now": now_iso,
         "elapsed_ms": elapsed_ms,
-        "today": {
-            "cost": round(total_cost, 4),
-            "messages": int(total_messages),
-            **{k: int(v) for k, v in total_tokens.items()},
-            "cache_hit_ratio": round(cache_hit_ratio, 4),
-            "cache_savings_usd": round(cache_savings_usd, 4),
-            "projects_today": projects_today,
-            "sessions_today": sessions_today,
-            "top_model_today": top_model_today,
-        },
+        "today": today_payload,
         "sources": sources_data,
         "active": active,
         "live_sessions": live_sessions,
         "last_session_seen": last_session_seen,
         "scan_source": scan_source,
+        "insights": _build_insights(
+            now_iso=now_iso,
+            today=today_payload,
+            active=active,
+            live_sessions=live_sessions,
+            by_project=by_project,
+            parse_errors=parse_errors,
+        ),
         # Additive: rich breakdowns + diagnostics.
         "by_project": by_project,
         "by_model": by_model,
@@ -162,6 +172,49 @@ def today() -> dict[str, Any]:
             "files_reparsed": int(scan_meta.get("files_reparsed", 0)),
             "last_scan_ms": int(scan_meta.get("last_scan_ms", elapsed_ms)),
         },
+    }
+
+
+def _build_insights(
+    *,
+    now_iso: str,
+    today: dict[str, Any],
+    active: dict[str, Any] | None,
+    live_sessions: list[dict[str, Any]],
+    by_project: list[dict[str, Any]],
+    parse_errors: int,
+) -> dict[str, Any]:
+    """Small derived metrics that make the flyout immediately actionable."""
+    cost = float(today.get("cost", 0.0) or 0.0)
+    messages = int(today.get("messages", 0) or 0)
+    cost_per_message = (cost / messages) if messages > 0 else 0.0
+
+    burn = float((active or {}).get("burn_rate_usd_per_hour", 0.0) or 0.0)
+    if not live_sessions:
+        burn = 0.0
+    projected = cost
+    if burn > 0:
+        try:
+            now = datetime.fromisoformat(now_iso)
+            seconds_left = 86400 - (
+                (now.hour * 3600) + (now.minute * 60) + now.second
+            )
+            projected = cost + burn * max(seconds_left, 0) / 3600.0
+        except ValueError:
+            projected = cost
+
+    top_project_share = 0.0
+    if cost > 0 and by_project:
+        top_project_share = max(float(p.get("cost", 0.0) or 0.0)
+                                for p in by_project) / cost
+
+    return {
+        "live_count": len(live_sessions),
+        "projected_today_cost": round(projected, 4),
+        "cost_per_message": round(cost_per_message, 4),
+        "cache_savings_usd": round(float(today.get("cache_savings_usd", 0.0) or 0.0), 4),
+        "top_project_share": round(top_project_share, 4),
+        "parse_errors": int(parse_errors or 0),
     }
 
 

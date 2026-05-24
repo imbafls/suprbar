@@ -6,7 +6,7 @@
 ;   2. iscc installer.iss                  (produces dist/suprbar-setup-X.Y.Z.exe)
 
 #define MyAppName      "supr.bar"
-#define MyAppVersion   "0.5.1"
+#define MyAppVersion   "0.6.0"
 #define MyAppPublisher "Omer Taji"
 #define MyAppURL       "https://github.com/imbafls/suprbar"
 #define MyAppExeName   "suprbar.exe"

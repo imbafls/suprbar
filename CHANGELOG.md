@@ -1,5 +1,16 @@
 # supr.bar CHANGELOG
 
+## v0.6.0 — usage command center
+
+- Adds impact insights: projected spend, average cost per message, cache savings,
+  live count, top-project share, and parse-error state.
+- Adds flyout polish: insight chips, hourly sparkline, provider status cards,
+  ranked project bars, live glow, and richer live-session rows.
+- Adds usability upgrades: copy summary, active session opener, range persistence,
+  1-7 range shortcuts, arrow-key range navigation, safer pinned auto-hide, and
+  clearer footer actions.
+- Adds a regression test for backend insight calculations.
+
 ## v0.5.1 — exe startup fix
 
 - Fix PyInstaller entry point (`suprbar_main.py`) so the Windows exe no longer

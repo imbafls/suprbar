@@ -17,7 +17,7 @@
         <div class="title">
           <span class="title-mark">S</span>
           supr.bar
-          <span class="ver">v0.5.1</span>
+          <span class="ver">v0.6</span>
         </div>
         <div class="head-actions">
           <button class="icon-btn refresh-btn" id="refreshBtn" aria-label="Refresh data" data-tip="Refresh (F5)">
@@ -74,6 +74,21 @@
         </div>
         <div class="source-line" id="sourceLine" hidden></div>
 
+        <div class="impact-strip" id="impactStrip" aria-label="Usage insights">
+          <div class="impact-chip">
+            <span class="impact-label">Projected</span>
+            <span class="impact-value" id="iProjected">—</span>
+          </div>
+          <div class="impact-chip">
+            <span class="impact-label">Avg/msg</span>
+            <span class="impact-value" id="iAvgMsg">—</span>
+          </div>
+          <div class="impact-chip">
+            <span class="impact-label">Saved</span>
+            <span class="impact-value" id="iSaved">—</span>
+          </div>
+        </div>
+
         <div class="token-bar" aria-hidden="true">
           <div class="tb-input"  id="tbIn"    style="width: 0%"></div>
           <div class="tb-output" id="tbOut"   style="width: 0%"></div>
@@ -85,6 +100,8 @@
           <span class="item" data-tip="Cached prompt tokens"><span class="sw" style="background: var(--b-success)"></span>cache · <span id="legCache">0</span></span>
           <span class="cache-hit" id="cacheHit" data-tip="Cache hit ratio"></span>
         </div>
+
+        <div class="hourly-spark" id="hourlySpark" aria-label="Hourly spend sparkline"></div>
       </div>
 
       <!-- metric row (active) -->
@@ -106,6 +123,8 @@
           <div class="metric-value small" id="mBurn">—</div>
         </div>
       </div>
+
+      <div class="source-cards" id="sourceCards" hidden></div>
 
       <!-- live sessions (from local JSONL scan) -->
       <div class="live-sessions" id="liveSessions" hidden>
@@ -153,7 +172,9 @@
       <div class="flyout-foot">
         <span id="footMeta">watching ~/.claude</span>
         <div class="actions">
-          <button class="btn-sm" id="openLogsBtn" data-tip="Open ~/.claude (Ctrl+L)">Open logs</button>
+          <button class="btn-sm" id="copySummaryBtn" data-tip="Copy usage summary (Ctrl+C)">Copy</button>
+          <button class="btn-sm" id="openActiveBtn" data-tip="Open active session file">Active</button>
+          <button class="btn-sm" id="openLogsBtn" data-tip="Open ~/.claude/projects">Logs</button>
         </div>
       </div>
 
@@ -206,8 +227,8 @@
             <div class="settings-section-title">About</div>
             <div class="settings-row">
               <div class="settings-row-main">
-                <div class="lbl">supr.bar <span id="aboutVersion">v0.5.1</span></div>
-                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">Alt+Q</span> quit · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> all shortcuts</div>
+                <div class="lbl">supr.bar <span id="aboutVersion">v0.6</span></div>
+                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">1–7</span> ranges · <span class="mono">Ctrl+C</span> copy · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> all shortcuts</div>
               </div>
             </div>
           </div>
@@ -235,7 +256,10 @@
       <li><span class="sh-desc">Quit app</span><kbd>Alt</kbd><kbd>Q</kbd></li>
       <li><span class="sh-desc">Open settings</span><kbd>Ctrl</kbd><kbd>,</kbd></li>
       <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl</kbd><kbd>L</kbd></li>
+      <li><span class="sh-desc">Focus API key</span><kbd>Ctrl</kbd><kbd>K</kbd></li>
       <li><span class="sh-desc">Export today</span><kbd>Ctrl</kbd><kbd>E</kbd></li>
+      <li><span class="sh-desc">Copy summary</span><kbd>Ctrl</kbd><kbd>C</kbd></li>
+      <li><span class="sh-desc">Switch ranges</span><kbd>1</kbd>…<kbd>7</kbd></li>
       <li><span class="sh-desc">Hide window</span><kbd>Ctrl</kbd><kbd>W</kbd></li>
       <li><span class="sh-desc">This help</span><kbd>?</kbd></li>
     </ul>
