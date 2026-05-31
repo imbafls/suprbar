@@ -1296,6 +1296,14 @@ document.getElementById('connRetryBtn')?.addEventListener('click', () => {
 });
 document.getElementById('helpBtn')?.addEventListener('click', toggleShortcutsHelp);
 document.getElementById('exportBtn')?.addEventListener('click', exportCurrentCSV);
+document.getElementById('reportBtn')?.addEventListener('click', async () => {
+  try {
+    const r = await fetch('/api/open-report', { method: 'POST' }).then(r => r.json());
+    toast(r.opened ? 'opening report…' : 'could not open report', r.opened ? 'ok' : 'err', 1600);
+  } catch (_) {
+    toast('could not open report', 'err');
+  }
+});
 document.getElementById('copyPathBtn')?.addEventListener('click', async () => {
   const path = lastData?.scan_source || '~/.claude/projects';
   try {

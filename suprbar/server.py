@@ -20,6 +20,9 @@ Routes:
   GET  /api/version                 app version + build date
   GET  /api/health                  liveness + last scan + uptime
   GET  /api/diagnostics             python/platform/cache/log/source health
+  GET  /report[.html]               30-day usage report page (relaxed CSP)
+  GET  /api/report                  30-day report payload (JSON)
+  POST /api/open-report             open the report in the default browser
 """
 
 from __future__ import annotations
@@ -35,11 +38,12 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, aggregator, config, scanner
+from . import __version__, aggregator, config, report, scanner
 from .providers import anthropic_api as p_anthropic_api
 from .providers import local as p_local
 
@@ -98,7 +102,27 @@ def invalidate_today_cache() -> None:
     _today_cache["data"] = None
     _today_cache["ts"] = 0.0
     _range_cache.clear()
+    _report_cache["data"] = None
+    _report_cache["ts"] = 0.0
     p_anthropic_api.invalidate_cache()
+
+
+# /report + /api/report payload cache. build_report() runs TWO full range scans
+# (current + previous 30d) and range_summary is NOT memoized, so without this
+# every browser refresh of the report re-scans all of ~/.claude. Invalidated
+# alongside the today/range caches on any config change.
+_report_cache: dict = {"data": None, "ts": 0.0}
+_REPORT_TTL = 30.0
+
+
+def report_cached() -> dict:
+    now = _now_monotonic()
+    if _report_cache["data"] and (now - _report_cache["ts"]) < _REPORT_TTL:
+        return _report_cache["data"]
+    data = report.build_report()
+    _report_cache["data"] = data
+    _report_cache["ts"] = now
+    return data
 
 
 def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> dict:
@@ -170,6 +194,21 @@ def _csp_header() -> str:
     )
 
 
+def _report_csp_header() -> str:
+    # The report page is a self-contained document with inline <script> and
+    # inline <style>; the strict CSP (no script-src) would block it. This
+    # relaxation applies ONLY to GET /report — every other route keeps the
+    # strict header from _csp_header(). Still same-origin/offline otherwise.
+    return (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
+        "img-src 'self' data:; "
+        "connect-src 'self';"
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # silence default stderr logging
         pass
@@ -233,6 +272,52 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error(404, "not_found", "static file not found")
         return self._send(200, p.read_bytes(), ctype)
 
+    def _send_html_with_csp(self, code: int, body: bytes, csp: str) -> None:
+        """Send an HTML document with an explicit CSP override.
+
+        Mirrors _send() (gzip + BrokenPipe guards) but writes headers manually
+        so this route can relax the CSP without touching _send_common_headers().
+        """
+        encoded, ce = self._maybe_gzip(body)
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        if ce:
+            self.send_header("Content-Encoding", ce)
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", csp)
+        self.end_headers()
+        try:
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            # Client (WebView2 page navigation, F5, shutdown) closed mid-write.
+            pass
+
+    def _serve_report(self):
+        """Render static/report.html with the report JSON substituted in.
+
+        Served with a relaxed CSP (inline script allowed) — see
+        _report_csp_header(). This route does NOT go through _send().
+        """
+        template_path = STATIC_DIR / "report.html"
+        if not template_path.exists():
+            return self._send_error(404, "not_found", "report template not found")
+        template = template_path.read_bytes().decode("utf-8")
+        try:
+            data = report_cached()
+        except Exception as e:  # noqa: BLE001
+            return self._send_error(500, "report_failed", str(e))
+        # Escape "</" so a project/model name containing "</script>" can't break
+        # out of the inline data literal (json.dumps does NOT escape it). Default
+        # ensure_ascii already \u-escapes U+2028/U+2029. Values rendered into the
+        # DOM are additionally HTML-escaped page-side (report.html `esc()`), so the
+        # relaxed inline-script CSP has no attacker-reachable script path.
+        payload = json.dumps(data).replace("</", "<\\/")
+        html = template.replace("__SUPRBAR_REPORT_JSON__", payload)
+        return self._send_html_with_csp(200, html.encode("utf-8"), _report_csp_header())
+
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0:
@@ -256,6 +341,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file("app.js", "application/javascript")
         if path == "/styles.css":
             return self._serve_file("styles.css", "text/css")
+
+        if path in ("/report", "/report.html"):
+            return self._serve_report()
+
+        if path == "/api/report":
+            try:
+                return self._send_json(200, report_cached())
+            except Exception as e:  # noqa: BLE001
+                return self._send_error(500, "report_failed", str(e))
 
         if path == "/api/ping":
             return self._send_json(200, {"ok": True, "pid": os.getpid()})
@@ -377,6 +471,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json_body()
             target = (body.get("p") or "").strip()
             return self._send_json(200, {"opened": _open_path(target)})
+
+        if path == "/api/open-report":
+            return self._send_json(200, {"opened": open_report_in_browser()})
 
         if path == "/api/quit":
             self._send_json(200, {"ok": True})
@@ -669,6 +766,22 @@ def _open_path(target: str) -> bool:
             subprocess.Popen(["xdg-open", str(p)])
         return True
     except OSError:
+        return False
+
+
+def open_report_in_browser() -> bool:
+    """Open the 30-day report in the user's default browser.
+
+    The flyout WebView is only ~360px wide, so a real browser window is the
+    right surface for the full report. Returns False if the server port is
+    not yet known or the browser launch fails.
+    """
+    if _HTTP_PORT is None:
+        return False
+    url = f"http://127.0.0.1:{_HTTP_PORT}/report"
+    try:
+        return webbrowser.open(url)
+    except Exception:  # noqa: BLE001
         return False
 
 

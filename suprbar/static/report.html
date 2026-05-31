@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-accent="blue">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>supr.bar · Usage Report · May 2026</title>
+<style>
+/* ============================================================================
+   supr.bar — Usage Report  ·  30-day spend report (standalone, self-contained)
+   Token system lifted verbatim from the supr.bar design system (mockup.css §8).
+   ========================================================================== */
+:root{
+  color-scheme: dark;
+  --b-bg:#0b0c0e; --b-surface:#131519; --b-surface-2:#191c21; --b-surface-3:#222630; --b-elevated:#16191e;
+  --b-line:rgba(226,232,244,.08); --b-line-2:rgba(226,232,244,.14);
+  --b-text:#eef1f6; --b-dim:#a4abb8; --b-dimmer:#6d7480; --b-faint:#474d57;
+  --b-accent:oklch(.66 .13 258); --b-accent-hot:oklch(.76 .115 258); --b-accent-2:oklch(.64 .11 300); --b-on-accent:#0b1018;
+  --b-accent-soft:color-mix(in oklab,var(--b-accent) 16%,transparent);
+  --b-accent-line:color-mix(in oklab,var(--b-accent) 38%,transparent);
+  --b-accent-ghost:color-mix(in oklab,var(--b-accent) 9%,transparent);
+  --b-success:oklch(.74 .15 152); --b-warn:oklch(.79 .15 78); --b-danger:oklch(.66 .20 25); --b-source-api:oklch(.72 .12 210);
+  --b-success-soft:color-mix(in oklab,var(--b-success) 16%,transparent);
+  --b-warn-soft:color-mix(in oklab,var(--b-warn) 18%,transparent);
+  --b-danger-soft:color-mix(in oklab,var(--b-danger) 16%,transparent);
+  --b-tok-in:var(--b-accent); --b-tok-out:var(--b-accent-2); --b-tok-cache:color-mix(in oklab,var(--b-accent) 30%,var(--b-dimmer));
+  --b-font:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --b-mono:ui-monospace,"Cascadia Code","Cascadia Mono","Segoe UI Mono",Consolas,"SF Mono","Roboto Mono",monospace;
+  --r-1:5px; --r-2:8px; --r-3:12px; --r-pill:999px;
+  --b-shadow:0 12px 40px -8px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.4);
+  --ease:cubic-bezier(.22,.61,.36,1); --dur:.18s;
+  --sheet:1080px;
+}
+[data-theme="light"]{
+  color-scheme:light;
+  --b-bg:#f3f4f7; --b-surface:#ffffff; --b-surface-2:#f0f2f6; --b-surface-3:#e5e8ef; --b-elevated:#ffffff;
+  --b-line:rgba(18,24,38,.10); --b-line-2:rgba(18,24,38,.16);
+  --b-text:#14181f; --b-dim:#515967; --b-dimmer:#828a97; --b-faint:#aeb5c0;
+  --b-accent-hot:oklch(.52 .14 258); --b-on-accent:#f5f8ff;
+  --b-shadow:0 12px 36px -10px rgba(20,28,45,.18),0 2px 6px rgba(20,28,45,.08);
+}
+[data-accent="violet"]{ --b-accent:oklch(.66 .135 292); --b-accent-hot:oklch(.76 .12 292); --b-accent-2:oklch(.64 .12 250); --b-on-accent:#120e1a; }
+[data-accent="blue"]  { --b-accent:oklch(.66 .13 258);  --b-accent-hot:oklch(.76 .115 258); --b-accent-2:oklch(.64 .11 300); --b-on-accent:#0b1018; }
+[data-accent="green"] { --b-accent:oklch(.70 .115 162); --b-accent-hot:oklch(.79 .105 162); --b-accent-2:oklch(.66 .09 200); --b-on-accent:#06150e; }
+[data-accent="orange"]{ --b-accent:oklch(.74 .125 66);  --b-accent-hot:oklch(.82 .11 66);  --b-accent-2:oklch(.68 .12 40);  --b-on-accent:#1c1206; }
+[data-accent="pink"]  { --b-accent:oklch(.68 .135 8);   --b-accent-hot:oklch(.77 .12 8);   --b-accent-2:oklch(.65 .12 330); --b-on-accent:#190e11; }
+[data-theme="light"][data-accent="violet"]{ --b-accent-hot:oklch(.52 .16 292); }
+[data-theme="light"][data-accent="blue"]  { --b-accent-hot:oklch(.52 .14 258); }
+[data-theme="light"][data-accent="green"] { --b-accent-hot:oklch(.50 .13 162); }
+[data-theme="light"][data-accent="orange"]{ --b-accent-hot:oklch(.54 .14 56); }
+[data-theme="light"][data-accent="pink"]  { --b-accent-hot:oklch(.53 .16 8); }
+
+*{ box-sizing:border-box; }
+html,body{ margin:0; }
+body{
+  font-family:var(--b-font); background:var(--b-bg); color:var(--b-text);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+.mono{ font-family:var(--b-mono); font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1,"ss01" 1; }
+::selection{ background:var(--b-accent-soft); }
+:focus-visible{ outline:2px solid var(--b-accent); outline-offset:2px; border-radius:var(--r-1); }
+
+/* ====================  TOOLBAR (no-print)  ============================= */
+.toolbar{
+  position:sticky; top:0; z-index:50;
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  padding:11px 22px;
+  background:color-mix(in oklab,var(--b-bg) 86%,transparent);
+  backdrop-filter:blur(14px) saturate(1.2);
+  border-bottom:1px solid var(--b-line);
+}
+.tb-brand{ display:flex; align-items:center; gap:9px; font-size:13.5px; font-weight:600; }
+.tb-mark{
+  width:22px; height:22px; border-radius:6px; display:grid; place-items:center;
+  font-weight:800; font-size:13px; color:var(--b-on-accent); letter-spacing:-.02em;
+  background:linear-gradient(140deg,var(--b-accent-hot),var(--b-accent) 55%,var(--b-accent-2));
+  box-shadow:0 1px 0 rgba(255,255,255,.15) inset,0 2px 6px var(--b-accent-soft);
+}
+.tb-brand .dot{ color:var(--b-dimmer); }
+.tb-brand .tag{ font-family:var(--b-mono); font-size:10px; color:var(--b-dim); background:var(--b-surface-2); border:1px solid var(--b-line); padding:1px 6px; border-radius:var(--r-pill); margin-left:2px; }
+.tb-spacer{ flex:1; }
+.tb-group{ display:flex; align-items:center; gap:6px; }
+.tb-seg{ display:flex; background:var(--b-surface-2); border:1px solid var(--b-line); border-radius:var(--r-pill); padding:2px; gap:2px; }
+.tb-seg button{ font:inherit; font-size:11px; color:var(--b-dim); background:none; border:0; cursor:pointer; padding:4px 11px; border-radius:var(--r-pill); }
+.tb-seg button.on{ background:var(--b-surface-3); color:var(--b-text); box-shadow:inset 0 0 0 1px var(--b-line-2); }
+.tb-dots{ display:flex; gap:6px; }
+.tb-dot{ width:17px; height:17px; border-radius:50%; border:2px solid transparent; padding:0; cursor:pointer; }
+.tb-dot.on{ border-color:var(--b-text); }
+.tb-dot[data-a="violet"]{ background:oklch(.66 .135 292); }
+.tb-dot[data-a="blue"]{ background:oklch(.66 .13 258); }
+.tb-dot[data-a="green"]{ background:oklch(.70 .115 162); }
+.tb-dot[data-a="orange"]{ background:oklch(.74 .125 66); }
+.tb-dot[data-a="pink"]{ background:oklch(.68 .135 8); }
+.btn{
+  display:inline-flex; align-items:center; gap:6px; justify-content:center; cursor:pointer;
+  font:inherit; font-size:12px; font-weight:550; line-height:1; padding:7px 13px;
+  border-radius:var(--r-1); background:var(--b-surface-2); border:1px solid var(--b-line-2); color:var(--b-text);
+  transition:background var(--dur),border-color var(--dur),transform .08s;
+}
+.btn:hover{ background:var(--b-surface-3); }
+.btn:active{ transform:translateY(.5px); }
+.btn.primary{ background:var(--b-accent); border-color:transparent; color:var(--b-on-accent); font-weight:600; }
+.btn.primary:hover{ background:var(--b-accent-hot); }
+.btn svg{ width:14px; height:14px; }
+
+/* ====================  SHEET  ========================================== */
+.sheet{ max-width:var(--sheet); margin:0 auto; padding:40px 28px 80px; }
+.report-head{ display:flex; align-items:flex-end; justify-content:space-between; gap:32px; flex-wrap:wrap; padding-bottom:26px; border-bottom:1px solid var(--b-line); }
+.rh-left{ display:flex; flex-direction:column; gap:14px; min-width:0; }
+.rh-id{ display:flex; align-items:center; gap:11px; }
+.rh-mark{
+  width:34px; height:34px; border-radius:9px; display:grid; place-items:center;
+  font-weight:800; font-size:19px; color:var(--b-on-accent); letter-spacing:-.02em;
+  background:linear-gradient(140deg,var(--b-accent-hot),var(--b-accent) 55%,var(--b-accent-2));
+  box-shadow:0 1px 0 rgba(255,255,255,.15) inset,0 4px 12px var(--b-accent-soft);
+}
+.rh-id .nm{ font-size:15px; font-weight:600; letter-spacing:-.01em; }
+.rh-id .nm .dot{ color:var(--b-dimmer); }
+.rh-eyebrow{ font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--b-accent-hot); font-weight:600; }
+.rh-title{ font-size:40px; font-weight:680; letter-spacing:-.025em; line-height:1.02; margin:0; }
+.rh-range{ font-family:var(--b-mono); font-size:14px; color:var(--b-dim); }
+.rh-meta{ display:flex; flex-direction:column; gap:7px; text-align:right; }
+.rh-meta .ml{ font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--b-dimmer); }
+.rh-meta .mv{ font-family:var(--b-mono); font-size:12.5px; color:var(--b-dim); }
+.rh-meta .mv b{ color:var(--b-text); font-weight:600; }
+.rh-srcline{ display:flex; align-items:center; gap:9px; font-family:var(--b-mono); font-size:12px; color:var(--b-dim); }
+.rh-srcline .sd{ width:8px; height:8px; border-radius:50%; flex:none; }
+.rh-srcline .sd.cc{ background:var(--b-accent); }
+.rh-srcline .sd.api{ background:var(--b-source-api); }
+.rh-srcline .sep{ color:var(--b-faint); }
+
+/* ====================  SOURCE CARDS  =================================== */
+.sources{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:16px; }
+.scard{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:18px 20px; display:flex; flex-direction:column; gap:12px; position:relative; overflow:hidden; }
+.scard::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--sc); }
+.scard .s-top{ display:flex; align-items:center; gap:9px; }
+.scard .s-dot{ width:9px; height:9px; border-radius:50%; background:var(--sc); flex:none; }
+.scard .s-name{ font-size:14px; font-weight:600; }
+.scard .s-kind{ font-family:var(--b-mono); font-size:10px; letter-spacing:.04em; color:var(--b-dim); background:var(--b-surface-2); border:1px solid var(--b-line); padding:1px 7px; border-radius:var(--r-pill); margin-left:auto; }
+.scard .s-cost{ font-family:var(--b-mono); font-size:30px; font-weight:650; letter-spacing:-.02em; display:flex; align-items:baseline; gap:8px; }
+.scard .s-cost .sh{ font-size:.42em; font-weight:600; color:var(--sc); }
+.scard .s-track{ height:6px; border-radius:var(--r-pill); background:var(--b-surface-3); overflow:hidden; }
+.scard .s-track > i{ display:block; height:100%; border-radius:var(--r-pill); background:var(--sc); }
+.scard .s-meta{ display:flex; justify-content:space-between; gap:12px; font-family:var(--b-mono); font-size:11px; color:var(--b-dimmer); }
+.scard .s-meta b{ color:var(--b-dim); font-weight:600; }
+
+/* section scaffolding */
+.section{ margin-top:38px; }
+.sec-head{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:16px; }
+.sec-ttl{ font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--b-dimmer); display:flex; align-items:center; gap:10px; }
+.sec-ttl::before{ content:""; width:14px; height:2px; border-radius:2px; background:var(--b-accent); }
+.sec-note{ font-family:var(--b-mono); font-size:11.5px; color:var(--b-dimmer); }
+
+/* ====================  HERO  =========================================== */
+.hero{ display:grid; grid-template-columns:minmax(0,360px) 1fr; gap:30px; align-items:center; margin-top:34px; }
+.hero-cost{ display:flex; flex-direction:column; gap:6px; }
+.hero-cost .eyebrow{ font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--b-dimmer); }
+.hero-num{
+  font-family:var(--b-mono); font-variant-numeric:tabular-nums; font-weight:650;
+  font-size:76px; line-height:.9; letter-spacing:-.035em; color:var(--b-text);
+  display:flex; align-items:baseline; gap:2px;
+}
+.hero-num .cur{ font-size:.4em; color:var(--b-accent-hot); font-weight:600; align-self:flex-start; margin-top:.15em; }
+.hero-num .cents{ color:var(--b-dim); font-size:.5em; font-weight:550; }
+.hero-cost .sub{ font-family:var(--b-mono); font-size:12.5px; color:var(--b-dim); margin-top:4px; }
+.hero-cost .sub .up{ color:var(--b-warn); }
+.hero-cost .sub .down{ color:var(--b-success); }
+.kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.kpi{ background:var(--b-surface-2); border:1px solid var(--b-line); border-radius:var(--r-2); padding:14px 16px; display:flex; flex-direction:column; gap:5px; }
+.kpi .k{ font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:var(--b-dimmer); }
+.kpi .v{ font-family:var(--b-mono); font-size:23px; font-weight:650; letter-spacing:-.02em; }
+.kpi .v .u{ font-size:.6em; color:var(--b-dimmer); font-weight:500; margin-left:1px; }
+.kpi .v.good{ color:var(--b-success); }
+.kpi .v.accent{ color:var(--b-accent-hot); }
+.kpi .x{ font-family:var(--b-mono); font-size:10.5px; color:var(--b-dimmer); }
+
+/* ====================  CHART  ========================================== */
+.chart-card{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:24px 24px 18px; }
+.chart-wrap{ position:relative; }
+.chart{ display:flex; align-items:flex-end; gap:4px; height:230px; position:relative; z-index:1; }
+.chart .col{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; gap:0; }
+.chart .bar{
+  width:100%; max-width:26px; border-radius:3px 3px 0 0; position:relative;
+  background:color-mix(in oklab,var(--b-accent) 60%,var(--b-surface-3));
+  transition:filter var(--dur); cursor:default;
+}
+.chart .bar.weekend{ background:color-mix(in oklab,var(--b-accent) 24%,var(--b-surface-3)); }
+.chart .bar.zero{ background:var(--b-surface-3); min-height:2px; }
+.chart .bar.peak{ background:linear-gradient(180deg,var(--b-accent-hot),var(--b-accent)); }
+.chart .col:hover .bar{ filter:brightness(1.18); }
+.chart .col:hover .tip{ opacity:1; transform:translate(-50%,0); }
+.tip{
+  position:absolute; bottom:calc(100% + 8px); left:50%; transform:translate(-50%,4px);
+  background:var(--b-elevated); border:1px solid var(--b-line-2); border-radius:var(--r-1);
+  padding:5px 9px; white-space:nowrap; box-shadow:var(--b-shadow); z-index:5;
+  opacity:0; pointer-events:none; transition:opacity var(--dur),transform var(--dur);
+}
+.tip .d{ font-size:10px; color:var(--b-dimmer); letter-spacing:.04em; }
+.tip .c{ font-family:var(--b-mono); font-size:12px; font-weight:650; }
+.avg-line{ position:absolute; left:0; right:0; border-top:1px dashed var(--b-line-2); z-index:0; }
+.avg-line .lbl{ position:absolute; right:0; top:-8px; font-family:var(--b-mono); font-size:10px; color:var(--b-dimmer); background:var(--b-surface); padding:0 5px; }
+.chart-axis{ display:flex; gap:4px; margin-top:8px; }
+.chart-axis .ax{ flex:1; min-width:0; text-align:center; font-family:var(--b-mono); font-size:9.5px; color:var(--b-faint); white-space:nowrap; }
+.chart-legend{ display:flex; gap:18px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid var(--b-line); font-size:11px; color:var(--b-dim); }
+.chart-legend .li{ display:inline-flex; align-items:center; gap:7px; }
+.chart-legend .sw{ width:10px; height:10px; border-radius:3px; }
+.chart-legend .sw.full{ background:color-mix(in oklab,var(--b-accent) 60%,var(--b-surface-3)); }
+.chart-legend .sw.wkd{ background:color-mix(in oklab,var(--b-accent) 24%,var(--b-surface-3)); }
+.chart-legend .sw.peak{ background:var(--b-accent-hot); }
+.chart-legend b{ color:var(--b-text); font-family:var(--b-mono); font-weight:600; }
+
+/* ====================  TWO-COL GRID  =================================== */
+.grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+.panel{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:20px 22px; }
+.panel-h{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; }
+.panel-h .t{ font-size:13px; font-weight:600; }
+.panel-h .n{ font-family:var(--b-mono); font-size:11px; color:var(--b-dimmer); }
+
+/* breakdown rows (model / project) */
+.brk{ display:flex; flex-direction:column; }
+.brow{ display:grid; grid-template-columns:1fr auto; gap:4px 12px; align-items:center; padding:11px 0; border-top:1px solid var(--b-line); }
+.brow:first-child{ border-top:0; }
+.brow .nm{ font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; min-width:0; }
+.brow .nm .rank{ font-family:var(--b-mono); font-size:10px; color:var(--b-dimmer); width:14px; }
+.brow .nm .swatch{ width:9px; height:9px; border-radius:2px; flex:none; }
+.brow .nm .label{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.brow .cost{ font-family:var(--b-mono); font-size:14px; font-weight:700; text-align:right; }
+.brow .bar{ grid-column:1/-1; height:5px; border-radius:var(--r-pill); background:var(--b-surface-3); overflow:hidden; }
+.brow .bar > i{ display:block; height:100%; border-radius:var(--r-pill); }
+.brow .meta{ grid-column:1; font-family:var(--b-mono); font-size:10.5px; color:var(--b-dimmer); }
+.brow .pct{ grid-column:2; font-family:var(--b-mono); font-size:10.5px; color:var(--b-dim); text-align:right; }
+
+/* ====================  BUDGET  ========================================= */
+.budget-card{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:22px 24px; display:flex; flex-direction:column; gap:14px; }
+.bc-top{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.bc-amt{ font-family:var(--b-mono); font-size:30px; font-weight:650; letter-spacing:-.02em; }
+.bc-amt .lim{ color:var(--b-dimmer); font-weight:500; font-size:.62em; }
+.bc-pct{ font-family:var(--b-mono); font-size:13px; font-weight:600; color:var(--b-warn); }
+.bc-track{ height:10px; border-radius:var(--r-pill); background:var(--b-surface-3); overflow:hidden; }
+.bc-fill{ height:100%; border-radius:var(--r-pill); background:linear-gradient(90deg,var(--b-warn),color-mix(in oklab,var(--b-warn) 70%,white)); }
+.bc-fill.nocap{ background:var(--b-accent); }
+.bc-sub{ display:flex; gap:20px; flex-wrap:wrap; font-family:var(--b-mono); font-size:12px; color:var(--b-dim); }
+.bc-sub b{ color:var(--b-text); }
+.bc-sub .ok{ color:var(--b-success); }
+
+/* ====================  TOKENS  ========================================= */
+.tok-card{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:20px 22px; }
+.tok-grid{ display:grid; grid-template-columns:1fr auto; gap:24px; align-items:center; }
+.tok-left{ display:flex; flex-direction:column; gap:12px; min-width:0; }
+.tok-bar{ display:flex; height:12px; border-radius:var(--r-pill); overflow:hidden; background:var(--b-surface-3); }
+.tok-bar > span{ height:100%; }
+.tb-in{ background:var(--b-tok-in); } .tb-out{ background:var(--b-tok-out); } .tb-cache{ background:var(--b-tok-cache); }
+.tok-legend{ display:flex; flex-wrap:wrap; gap:20px; font-size:12px; color:var(--b-dim); }
+.tok-legend .li{ display:inline-flex; align-items:center; gap:7px; }
+.tok-legend .sw{ width:10px; height:10px; border-radius:3px; }
+.tok-legend .sw.in{ background:var(--b-tok-in); } .tok-legend .sw.out{ background:var(--b-tok-out); } .tok-legend .sw.cache{ background:var(--b-tok-cache); }
+.tok-legend b{ color:var(--b-text); font-family:var(--b-mono); font-weight:600; }
+.cache-stat{ display:flex; flex-direction:column; gap:3px; padding-left:24px; border-left:1px solid var(--b-line); }
+.cache-stat .k{ font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:var(--b-dimmer); }
+.cache-stat .big{ font-family:var(--b-mono); font-size:30px; font-weight:650; color:var(--b-accent-hot); letter-spacing:-.02em; }
+.cache-stat .saved{ font-family:var(--b-mono); font-size:12px; color:var(--b-success); }
+
+/* ====================  INSIGHTS  ======================================= */
+.insights{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.ins{ background:var(--b-surface-2); border:1px solid var(--b-line); border-radius:var(--r-2); padding:18px; display:flex; flex-direction:column; gap:9px; }
+.ins .ico{ width:30px; height:30px; border-radius:var(--r-1); display:grid; place-items:center; color:var(--b-accent-hot); background:var(--b-accent-soft); border:1px solid var(--b-accent-line); }
+.ins .ico svg{ width:16px; height:16px; }
+.ins .big{ font-family:var(--b-mono); font-size:21px; font-weight:650; letter-spacing:-.02em; }
+.ins .tx{ font-size:12.5px; color:var(--b-dim); line-height:1.45; }
+.ins .tx b{ color:var(--b-text); font-weight:600; }
+
+/* ====================  FOOTER  ========================================= */
+.report-foot{ margin-top:48px; padding-top:22px; border-top:1px solid var(--b-line); display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+.rf-left{ display:flex; align-items:center; gap:10px; font-size:12px; color:var(--b-dim); }
+.rf-left .lock{ width:14px; height:14px; color:var(--b-success); }
+.rf-left b{ color:var(--b-text); }
+.rf-meta{ font-family:var(--b-mono); font-size:11px; color:var(--b-dimmer); }
+
+/* ====================  RESPONSIVE  ===================================== */
+@media (max-width:860px){
+  .hero{ grid-template-columns:1fr; gap:22px; }
+  .kpis{ grid-template-columns:repeat(2,1fr); }
+  .grid-2{ grid-template-columns:1fr; }
+  .insights{ grid-template-columns:1fr; }
+  .tok-grid{ grid-template-columns:1fr; }
+  .cache-stat{ padding-left:0; border-left:0; border-top:1px solid var(--b-line); padding-top:14px; }
+  .rh-title{ font-size:30px; }
+}
+
+/* ====================  PRINT  ========================================== */
+@media print{
+  @page{ margin:14mm; }
+  html,body{ background:#fff; }
+  .toolbar{ display:none !important; }
+  body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .sheet{ max-width:none; padding:0; }
+  .section,.hero,.chart-card,.panel,.budget-card,.tok-card,.ins,.report-head{ break-inside:avoid; }
+  .chart{ height:200px; }
+}
+</style>
+</head>
+<body>
+  <!-- ============================  TOOLBAR  ============================ -->
+  <div class="toolbar">
+    <div class="tb-brand"><span class="tb-mark">S</span>supr<span class="dot">.</span>bar<span class="tag">Report</span></div>
+    <span class="tb-spacer"></span>
+    <div class="tb-group">
+      <div class="tb-seg" id="segTheme">
+        <button data-theme="dark" class="on">Dark</button>
+        <button data-theme="light">Light</button>
+      </div>
+    </div>
+    <div class="tb-group">
+      <div class="tb-dots" id="segAccent">
+        <button class="tb-dot" data-a="violet" aria-label="Violet"></button>
+        <button class="tb-dot on" data-a="blue" aria-label="Blue"></button>
+        <button class="tb-dot" data-a="green" aria-label="Green"></button>
+        <button class="tb-dot" data-a="orange" aria-label="Orange"></button>
+        <button class="tb-dot" data-a="pink" aria-label="Pink"></button>
+      </div>
+    </div>
+    <button class="btn" id="dlBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download HTML</button>
+    <button class="btn primary" id="pdfBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Save as PDF</button>
+  </div>
+
+  <!-- ============================  SHEET  ============================== -->
+  <div class="sheet">
+    <!-- header -->
+    <header class="report-head">
+      <div class="rh-left">
+        <div class="rh-id">
+          <span class="rh-mark">S</span>
+          <span class="nm">supr<span class="dot">.</span>bar</span>
+        </div>
+        <div>
+          <div class="rh-eyebrow">Usage Report · 30 days</div>
+          <h1 class="rh-title">Coding agent spend</h1>
+        </div>
+        <div class="rh-srcline" id="rhSrcLine"></div>
+        <div class="rh-range" id="rhRange"></div>
+      </div>
+      <div class="rh-meta">
+        <div><div class="ml">Generated</div><div class="mv" id="rhGen"></div></div>
+        <div><div class="ml">Source</div><div class="mv" id="rhSrc"></div></div>
+        <div><div class="ml">Machine</div><div class="mv" id="rhMachine"></div></div>
+      </div>
+    </header>
+
+    <!-- hero -->
+    <section class="hero">
+      <div class="hero-cost">
+        <span class="eyebrow">Total spend · 30 days</span>
+        <div class="hero-num" id="heroNum"></div>
+        <div class="sub" id="heroSub"></div>
+      </div>
+      <div class="kpis" id="kpis"></div>
+    </section>
+
+    <!-- by source -->
+    <section class="section">
+      <div class="sec-head"><div class="sec-ttl">By source</div><div class="sec-note" id="srcNote"></div></div>
+      <div class="sources" id="bySource"></div>
+    </section>
+
+    <!-- daily chart -->
+    <section class="section">
+      <div class="sec-head">
+        <div class="sec-ttl">Daily spend</div>
+        <div class="sec-note" id="chartNote"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-wrap">
+          <div class="chart" id="chart"></div>
+        </div>
+        <div class="chart-axis" id="chartAxis"></div>
+        <div class="chart-legend">
+          <span class="li"><span class="sw full"></span>Weekday</span>
+          <span class="li"><span class="sw wkd"></span>Weekend</span>
+          <span class="li"><span class="sw peak"></span>Peak day</span>
+          <span class="li" style="margin-left:auto">Daily avg <b id="legAvg"></b> · Peak <b id="legPeak"></b></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- budget -->
+    <section class="section">
+      <div class="sec-head"><div class="sec-ttl">Monthly budget</div><div class="sec-note" id="budgetNote"></div></div>
+      <div class="budget-card">
+        <div class="bc-top">
+          <div class="bc-amt" id="bcAmt"></div>
+          <div class="bc-pct" id="bcPct"></div>
+        </div>
+        <div class="bc-track"><div class="bc-fill" id="bcFill"></div></div>
+        <div class="bc-sub" id="bcSub"></div>
+      </div>
+    </section>
+
+    <!-- by model / by project -->
+    <section class="section">
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-h"><span class="t">By model</span><span class="n" id="modelN"></span></div>
+          <div class="brk" id="byModel"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-h"><span class="t">Top projects</span><span class="n" id="projN"></span></div>
+          <div class="brk" id="byProject"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- tokens & cache -->
+    <section class="section">
+      <div class="sec-head"><div class="sec-ttl">Token mix &amp; cache efficiency</div><div class="sec-note" id="tokNote"></div></div>
+      <div class="tok-card">
+        <div class="tok-grid">
+          <div class="tok-left">
+            <div class="tok-bar" id="tokBar"></div>
+            <div class="tok-legend" id="tokLegend"></div>
+          </div>
+          <div class="cache-stat">
+            <span class="k">Cache hit rate</span>
+            <span class="big" id="cacheBig"></span>
+            <span class="saved" id="cacheSaved"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- insights -->
+    <section class="section">
+      <div class="sec-head"><div class="sec-ttl">Highlights</div></div>
+      <div class="insights" id="insights"></div>
+    </section>
+
+    <!-- footer -->
+    <footer class="report-foot">
+      <div class="rf-left">
+        <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span id="rfSrcLine"></span>
+      </div>
+      <div class="rf-meta" id="rfMeta"></div>
+    </footer>
+  </div>
+
+<script>
+/* ============================================================================
+   Report data — injected by the supr.bar backend at serve time. The server
+   string-replaces the placeholder below with a real JSON object built from a
+   30-day scan of the configured sources. When this file is opened directly
+   (without the server) the placeholder is not valid JS and the report won't
+   render — that's expected.
+   ========================================================================== */
+const REPORT = __SUPRBAR_REPORT_JSON__;
+
+/* ---------- formatters ---------- */
+const money = n => "$" + n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0 = n => "$" + Math.round(n).toLocaleString("en-US");
+const compact = n => n>=1e6 ? (n/1e6).toFixed(n>=1e8?0:1).replace(/\.0$/,"")+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"k" : ""+n;
+const intc = n => n.toLocaleString("en-US");
+const $ = s => document.querySelector(s);
+// HTML-escape values that originate from disk (project dir names, model ids,
+// machine/source strings) before they go into innerHTML. The page is served
+// with a relaxed inline-script CSP so this escaping is the load-bearing XSS
+// defense, not a nicety.
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- derived ---------- */
+const dayVals = REPORT.byDay.map(d=>d[1]);
+const total = dayVals.reduce((a,b)=>a+b,0);
+const activeDays = dayVals.filter(v=>v>0).length;
+const avg = REPORT.byDay.length ? total/REPORT.byDay.length : 0;
+const peak = dayVals.length ? Math.max(...dayVals) : 0;
+const peakIdx = dayVals.length ? dayVals.indexOf(peak) : -1;
+const totalMessages = REPORT.byModel.reduce((a,m)=>a+m.messages,0);
+const totalTokens = REPORT.byModel.reduce((a,m)=>a+m.tokens,0);
+const costPerMsg = totalMessages>0 ? total/totalMessages : 0;
+const deltaPct = REPORT.totals.prevMonthCost>0 ? (total-REPORT.totals.prevMonthCost)/REPORT.totals.prevMonthCost*100 : 0;
+
+/* ---------- header ---------- */
+$("#rhRange").textContent = REPORT.meta.rangeLabel;
+$("#rhGen").innerHTML = "<b>"+REPORT.meta.generated+"</b>";
+$("#rhSrc").innerHTML = "<b>"+esc(REPORT.meta.source)+"</b>";
+$("#rhMachine").innerHTML = "<b>"+esc(REPORT.meta.machine)+"</b>";
+$("#rhSrcLine").innerHTML = REPORT.bySource.map(s=>'<span class="sd '+s.cls+'"></span>'+esc(s.name)).join('<span class="sep">·</span>');
+
+/* ---------- hero ---------- */
+const tParts = total.toFixed(2).split(".");
+$("#heroNum").innerHTML = '<span class="cur">$</span>'+intc(+tParts[0])+'<span class="cents">.'+tParts[1]+'</span>';
+const up = deltaPct>=0;
+$("#heroSub").innerHTML = '<span class="'+(up?"up":"down")+'">'+(up?"▲":"▼")+" "+Math.abs(deltaPct).toFixed(0)+
+  '%</span> vs previous 30 days ('+money(REPORT.totals.prevMonthCost)+')';
+
+const kpis=[
+  {k:"Messages",v:intc(totalMessages)},
+  {k:"Tokens",v:compact(totalTokens)},
+  {k:"Sessions",v:intc(REPORT.totals.sessions)},
+  {k:"Active days",v:activeDays+'<span class="u">/'+REPORT.byDay.length+'</span>'},
+  {k:"Avg / day",v:money(avg),cls:"accent"},
+  {k:"Cache saved",v:money(REPORT.totals.cacheSavings),cls:"good"}
+];
+$("#kpis").innerHTML = kpis.map(x=>'<div class="kpi"><span class="k">'+x.k+'</span><span class="v '+(x.cls||"")+'">'+x.v+'</span></div>').join("");
+
+/* ---------- by source ---------- */
+const maxSrc = Math.max(...REPORT.bySource.map(s=>s.cost));
+$("#srcNote").textContent = REPORT.bySource.length>1
+  ? REPORT.bySource.length+" tools merged into one rollup"
+  : "local rollup";
+$("#bySource").innerHTML = REPORT.bySource.map(s=>{
+  const share = total>0 ? s.cost/total*100 : 0;
+  return '<div class="scard" style="--sc:'+s.color+'">'+
+    '<div class="s-top"><span class="s-dot"></span><span class="s-name">'+esc(s.name)+'</span><span class="s-kind">'+esc(s.kind)+'</span></div>'+
+    '<div class="s-cost">'+money(s.cost)+'<span class="sh">'+share.toFixed(0)+'%</span></div>'+
+    '<div class="s-track"><i style="width:'+(maxSrc>0?s.cost/maxSrc*100:0)+'%"></i></div>'+
+    '<div class="s-meta"><span><b>'+intc(s.messages)+'</b> messages</span><span>top model <b>'+esc(s.topModel)+'</b></span></div>'+
+    '</div>';
+}).join("");
+
+/* ---------- chart ---------- */
+$("#chartNote").textContent = "avg "+money(avg)+" / day · "+activeDays+" active days";
+$("#legAvg").textContent = money(avg);
+$("#legPeak").textContent = money(peak);
+const chart = REPORT.byDay.map((d,i)=>{
+  const [dateLabel,cost,wknd]=d;
+  const h = peak>0 ? Math.max(cost===0?0:2,(cost/peak)*100) : 0;
+  const cls = cost===0?"zero":(i===peakIdx?"peak":(wknd?"weekend":""));
+  return '<div class="col"><div class="bar '+cls+'" style="height:'+h+'%">'+
+    '<span class="tip"><span class="d">'+dateLabel+'</span><span class="c">'+(cost===0?"—":money(cost))+'</span></span>'+
+    '</div></div>';
+}).join("");
+$("#chart").innerHTML = chart;
+// avg reference line (positioned from bottom by avg/peak within 230px chart)
+const avgPct = peak>0 ? (avg/peak)*100 : 0;
+const line = document.createElement("div");
+line.className="avg-line";
+line.style.bottom = "calc("+avgPct+"% + 0px)";
+line.innerHTML = '<span class="lbl">avg</span>';
+$("#chart").appendChild(line);
+// x-axis: label roughly every 4th day
+$("#chartAxis").innerHTML = REPORT.byDay.map((d,i)=> '<div class="ax">'+((i%4===0)?d[0]:"")+'</div>').join("");
+
+/* ---------- budget ---------- */
+const b=REPORT.budget;
+if(b.limit>0){
+  const bpct=b.spent/b.limit*100, remain=b.limit-b.spent;
+  $("#budgetNote").textContent = "cap "+money(b.limit)+" · alert at "+b.alertPct+"%";
+  $("#bcAmt").innerHTML = money(b.spent)+' <span class="lim">/ '+money0(b.limit)+'</span>';
+  $("#bcPct").textContent = bpct.toFixed(1)+"% used";
+  $("#bcFill").style.width = bpct.toFixed(1)+"%";
+  $("#bcSub").innerHTML = '<span><b>'+money(remain)+'</b> remaining</span>'+
+    '<span class="ok">under cap with '+(100-bpct).toFixed(0)+'% to spare</span>'+
+    '<span>projected close: <b>'+money(activeDays>0?b.spent/activeDays*REPORT.byDay.length:b.spent)+'</b> at this pace</span>';
+}else{
+  $("#budgetNote").textContent = "no budget configured";
+  $("#bcAmt").innerHTML = money(b.spent);
+  $("#bcPct").textContent = "";
+  $("#bcFill").classList.add("nocap");
+  $("#bcFill").style.width = "0%";
+  $("#bcSub").innerHTML = '<span><b>'+money(b.spent)+'</b> spent · no cap set</span>';
+}
+
+/* ---------- by model ---------- */
+const maxModel = Math.max(...REPORT.byModel.map(m=>m.cost));
+$("#modelN").textContent = new Set(REPORT.byModel.map(m=>m.model)).size+" models · "+REPORT.bySource.length+" sources";
+$("#byModel").innerHTML = REPORT.byModel.slice().sort((a,b)=>b.cost-a.cost).map(m=>{
+  const share = total>0 ? m.cost/total*100 : 0;
+  return '<div class="brow">'+
+    '<span class="nm"><span class="swatch" style="background:'+m.accent+'"></span><span class="label">'+esc(m.model)+'</span></span>'+
+    '<span class="cost">'+money(m.cost)+'</span>'+
+    '<span class="bar"><i style="width:'+(maxModel>0?m.cost/maxModel*100:0)+'%;background:'+m.accent+'"></i></span>'+
+    '<span class="meta">'+intc(m.messages)+' msg · '+compact(m.tokens)+' tok · '+esc(m.src)+'</span>'+
+    '<span class="pct">'+share.toFixed(0)+'%</span>'+
+    '</div>';
+}).join("");
+
+/* ---------- by project ---------- */
+const maxProj = Math.max(...REPORT.byProject.map(p=>p.cost));
+$("#projN").textContent = REPORT.totals.projects+" projects";
+$("#byProject").innerHTML = REPORT.byProject.map((p,i)=>{
+  const share = total>0 ? p.cost/total*100 : 0;
+  const col = p.muted ? "var(--b-dimmer)" : "var(--b-accent)";
+  return '<div class="brow">'+
+    '<span class="nm"><span class="rank">'+(p.muted?"":(i+1))+'</span><span class="label" '+(p.muted?'style="color:var(--b-dimmer)"':'')+'>'+esc(p.project)+'</span></span>'+
+    '<span class="cost">'+money(p.cost)+'</span>'+
+    '<span class="bar"><i style="width:'+(maxProj>0?p.cost/maxProj*100:0)+'%;background:'+col+'"></i></span>'+
+    '<span class="meta">'+intc(p.messages)+' msg · '+p.model+'</span>'+
+    '<span class="pct">'+share.toFixed(0)+'%</span>'+
+    '</div>';
+}).join("");
+
+/* ---------- tokens ---------- */
+const tk=REPORT.tokens, tkTotal=tk.input+tk.output+tk.cache;
+$("#tokNote").textContent = compact(tkTotal)+" tokens processed";
+$("#tokBar").innerHTML =
+  '<span class="tb-in" style="width:'+(tkTotal>0?tk.input/tkTotal*100:0)+'%"></span>'+
+  '<span class="tb-out" style="width:'+(tkTotal>0?tk.output/tkTotal*100:0)+'%"></span>'+
+  '<span class="tb-cache" style="width:'+(tkTotal>0?tk.cache/tkTotal*100:0)+'%"></span>';
+$("#tokLegend").innerHTML =
+  '<span class="li"><span class="sw in"></span>input <b>'+compact(tk.input)+'</b></span>'+
+  '<span class="li"><span class="sw out"></span>output <b>'+compact(tk.output)+'</b></span>'+
+  '<span class="li"><span class="sw cache"></span>cache read <b>'+compact(tk.cache)+'</b></span>';
+$("#cacheBig").textContent = Math.round(REPORT.totals.cacheHitRatio*100)+"%";
+$("#cacheSaved").textContent = "saved "+money(REPORT.totals.cacheSavings);
+
+/* ---------- insights ---------- */
+const icoSave='<path d="M20 6L9 17l-5-5"/>';
+const icoBolt='<path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/>';
+const icoPeak='<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v6h-6"/>';
+const cacheDenom = total+REPORT.totals.cacheSavings;
+const src0 = REPORT.bySource[0], src1 = REPORT.bySource[1];
+const insights=[
+  {ico:icoSave, big:money(REPORT.totals.cacheSavings),
+   tx:'Cache reads saved you <b>'+(cacheDenom>0?Math.round(REPORT.totals.cacheSavings/cacheDenom*100):0)+'%</b> of what an uncached run would have cost — a '+Math.round(REPORT.totals.cacheHitRatio*100)+'% hit rate across '+compact(tkTotal)+' tokens.'},
+  src1
+    ? {ico:icoBolt, big:Math.round((total>0?src0.cost/total:0)*100)+'% · '+Math.round((total>0?src1.cost/total:0)*100)+'%',
+       tx:'<b>'+esc(src0.name)+'</b> was the bigger spend at '+money(src0.cost)+'; <b>'+esc(src1.name)+'</b> added '+money(src1.cost)+' across '+intc(src1.messages)+' messages.'}
+    : {ico:icoBolt, big:Math.round((total>0?src0.cost/total:0)*100)+'%',
+       tx:'<b>'+esc(src0.name)+'</b> accounted for all '+money(src0.cost)+' of tracked spend across '+intc(src0.messages)+' messages.'},
+  {ico:icoPeak, big:money(peak),
+   tx:'Busiest day was <b>'+(REPORT.totals.peakDayName ? REPORT.totals.peakDayName+", " : "")+(peakIdx>=0 ? esc(REPORT.byDay[peakIdx][0]) : "—")+'</b> — '+(avg>0?(peak/avg).toFixed(1):"—")+'× your daily average.'}
+];
+$("#insights").innerHTML = insights.map(x=>
+  '<div class="ins"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+x.ico+'</svg></span>'+
+  '<span class="big">'+x.big+'</span><span class="tx">'+x.tx+'</span></div>').join("");
+
+/* ---------- footer source line ---------- */
+const srcNames = REPORT.bySource.map(s=>'<b>'+esc(s.name)+'</b>');
+let srcSentence;
+if(srcNames.length===1){
+  srcSentence = 'Read from '+srcNames[0]+' (local) — supr.bar sends no telemetry.';
+}else if(srcNames.length===2){
+  srcSentence = 'Merged from '+srcNames[0]+' and '+srcNames[1]+' — supr.bar sends no telemetry.';
+}else if(srcNames.length>2){
+  srcSentence = 'Merged from '+srcNames.slice(0,-1).join(', ')+' and '+srcNames[srcNames.length-1]+' — supr.bar sends no telemetry.';
+}else{
+  srcSentence = 'supr.bar sends no telemetry.';
+}
+$("#rfSrcLine").innerHTML = srcSentence;
+
+/* ---------- footer meta ---------- */
+$("#rfMeta").textContent = "supr.bar "+REPORT.meta.version+" · "+REPORT.meta.generated+" · avg "+money(costPerMsg)+"/msg";
+
+/* ============================  TOOLBAR  ============================ */
+const root = document.documentElement;
+document.querySelectorAll("#segTheme button").forEach(btn=>btn.addEventListener("click",()=>{
+  root.dataset.theme=btn.dataset.theme;
+  document.querySelectorAll("#segTheme button").forEach(b=>b.classList.toggle("on",b===btn));
+}));
+document.querySelectorAll("#segAccent .tb-dot").forEach(btn=>btn.addEventListener("click",()=>{
+  root.dataset.accent=btn.dataset.a;
+  document.querySelectorAll("#segAccent .tb-dot").forEach(b=>b.classList.toggle("on",b===btn));
+}));
+$("#pdfBtn").addEventListener("click",()=>window.print());
+$("#dlBtn").addEventListener("click",()=>{
+  const html = "<!DOCTYPE html>\n"+document.documentElement.outerHTML;
+  const blob = new Blob([html],{type:"text/html"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="supr.bar-report-"+REPORT.meta.rangeLabel.replace(/[^\w]+/g,"-").toLowerCase()+".html";
+  a.click(); URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>

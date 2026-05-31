@@ -244,6 +244,12 @@ class TrayApp:
         self._pulse_icon()
         self._update_tooltip()
 
+    def _on_report(self, icon, item):
+        try:
+            server.open_report_in_browser()
+        except Exception:
+            log.exception("open report failed")
+
     def _on_pin_toggle(self, icon, item):
         new = not config.is_pinned()
         config.set_pinned(new)
@@ -439,6 +445,7 @@ class TrayApp:
         menu = pystray.Menu(
             pystray.MenuItem("Open supr.bar", self._on_default, default=True),
             pystray.MenuItem("Refresh now", self._on_refresh),
+            pystray.MenuItem("30-day report…", self._on_report),
             pystray.MenuItem("Pin (don't auto-hide)", self._on_pin_toggle,
                              checked=self._is_pinned),
             pystray.Menu.SEPARATOR,
