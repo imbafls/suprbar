@@ -1,5 +1,41 @@
 # supr.bar CHANGELOG
 
+## v0.9.0 — 30-day usage report export
+
+A new **HTML-based usage report** — a beautiful, self-contained, printable
+spend report covering the last 30 days, built from the same local `~/.claude`
+scan that drives the flyout. Integrated from a Claude Design handoff.
+
+### The report
+- Open it from the tray menu (**"30-day report…"**) or the flyout **Report**
+  button — both launch the full report in your real browser (the flyout popup
+  is only ~360px wide; the report wants room).
+- **Glance-down-the-page** layout: a hero 30-day total with a *vs previous 30
+  days* delta, KPI row (messages / tokens / sessions / active days / avg-day /
+  cache saved), a daily-spend bar chart with weekday/weekend/peak shading and an
+  average line, monthly-budget gauge, **by-model** and **top-projects**
+  breakdowns, a token-mix + cache-efficiency panel, and a few derived highlights.
+- **Download HTML** gives a fully self-contained file you can keep or share
+  offline; **Save as PDF** prints it. Dark/light + all five accents, same token
+  system as the app.
+
+### Honest by default
+- v1 is **local-only** (Claude Code) and says so — one source card, footer reads
+  "Read from Claude Code (local) — supr.bar sends no telemetry." The payload is
+  list-shaped so a future multi-source merge is a drop-in.
+- No monthly budget set → the budget section shows a calm "no cap set" state
+  instead of a fake gauge. No `~/.claude` history → a zero-state, not a blank page.
+
+### Under the hood
+- `report.build_report()` assembles the payload from `range_summary("30d")` plus
+  a previous-30-day comparison, honoring your project allow/deny filters.
+- New routes `GET /report`, `GET /api/report`, `POST /api/open-report`; the
+  payload is cached (30s) and invalidated with the existing today/range caches,
+  so refreshes don't re-run the disk scan.
+- Disk-derived strings (project names, model ids) are HTML-escaped and the
+  injected JSON is `</`-escaped, so the report stays safe under its scoped
+  inline-script CSP.
+
 ## v0.8.0 — glance-first redesign
 
 A full visual redesign, integrated from a Claude Design handoff. The flyout was
