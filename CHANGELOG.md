@@ -1,5 +1,17 @@
 # supr.bar CHANGELOG
 
+## v0.10.2 — updater download-host fix
+
+- **Critical updater fix.** GitHub serves release-asset downloads from
+  `release-assets.githubusercontent.com`, but the updater's host allowlist only
+  had `objects.githubusercontent.com`, so the per-redirect-hop host check
+  rejected the real download and **"Update" failed** with *"redirect to
+  disallowed host"*. The allowlist now accepts any GitHub-owned
+  `*.githubusercontent.com` host (look-alikes still rejected), validated end to
+  end against a live release. v0.10.0 / v0.10.1 can *detect* an update but can't
+  download it — **install this build manually once**, and auto-update works from
+  here on.
+
 ## v0.10.1 — updater shakedown
 
 - **First release that exercises the in-app auto-updater end to end** (v0.10.0 →

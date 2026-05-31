@@ -58,9 +58,13 @@ DOWNLOAD_TIMEOUT = 120
 _RETRY_BACKOFFS = (0.5, 1.0, 2.0)
 
 ASSET_RE = re.compile(r"^suprbar-setup-\d+\.\d+\.\d+\.exe$")
-ALLOWED_HOSTS = frozenset((
-    "api.github.com", "github.com", "objects.githubusercontent.com",
-))
+ALLOWED_HOSTS = frozenset(("api.github.com", "github.com"))
+# GitHub serves release-asset bytes from its user-content CDN, and the subdomain
+# has changed over time (objects. → release-assets.). Allow any host under
+# *.githubusercontent.com (all GitHub-owned) so a CDN rename doesn't break the
+# download, while still refusing any non-GitHub host. The leading dot prevents
+# look-alikes like "evilgithubusercontent.com".
+_CDN_SUFFIX = ".githubusercontent.com"
 MAX_ASSET_BYTES = 200 * 1024 * 1024   # 200 MB sanity ceiling
 
 _lock = threading.Lock()
@@ -105,12 +109,16 @@ def _compare_versions(a: str, b: str) -> int:
 # ---------------------------------------------------- host / asset checks ----
 
 def _host_ok(url: str) -> bool:
-    """True only for https URLs whose host is in the allowlist."""
+    """True only for https URLs on github.com / api.github.com or GitHub's
+    *.githubusercontent.com asset CDN."""
     try:
         sp = urlsplit(url)
     except Exception:  # noqa: BLE001
         return False
-    return sp.scheme == "https" and sp.hostname in ALLOWED_HOSTS
+    if sp.scheme != "https" or not sp.hostname:
+        return False
+    host = sp.hostname.lower()
+    return host in ALLOWED_HOSTS or host.endswith(_CDN_SUFFIX)
 
 
 def _pick_installer_asset(release: dict) -> dict | None:
