@@ -89,7 +89,10 @@ def build_installer() -> Path | None:
         return None
     print(f"  using {iscc}")
     step("Compiling installer.iss")
-    code = run([iscc, "installer.iss"])
+    # Pass the version explicitly so the installer name + metadata track
+    # suprbar.__version__ instead of a hand-bumped literal in installer.iss.
+    from suprbar import __version__
+    code = run([iscc, f"/DMyAppVersion={__version__}", "installer.iss"])
     if code != 0:
         sys.exit("Inno Setup compile failed")
     # Find the produced installer

@@ -6,7 +6,12 @@
 ;   2. iscc installer.iss                  (produces dist/suprbar-setup-X.Y.Z.exe)
 
 #define MyAppName      "supr.bar"
-#define MyAppVersion   "0.8.0"
+; Version is normally injected by the build (iscc /DMyAppVersion=...), sourced
+; from suprbar/__version__ locally and the git tag in CI. The literal below is
+; only a fallback for a bare `iscc installer.iss` — keep it in sync on release.
+#ifndef MyAppVersion
+  #define MyAppVersion "0.9.0"
+#endif
 #define MyAppPublisher "Omer Taji"
 #define MyAppURL       "https://github.com/imbafls/suprbar"
 #define MyAppExeName   "suprbar.exe"

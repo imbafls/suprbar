@@ -1,5 +1,15 @@
 # supr.bar CHANGELOG
 
+## v0.9.1 — installer version fix
+
+- **Fix:** the v0.9.0 installer asset was mislabeled `suprbar-setup-0.8.0.exe`
+  (with 0.8.0 version metadata) because `installer.iss` hardcoded the version as
+  a separate source of truth. The build now injects the version — from the git
+  tag in CI and from `suprbar.__version__` for local builds — with the
+  `installer.iss` literal demoted to a fallback, so the installer name and
+  metadata always track the release. The app itself and the portable zip were
+  already correct in v0.9.0; this only affects the installer's label/metadata.
+
 ## v0.9.0 — 30-day usage report export
 
 A new **HTML-based usage report** — a beautiful, self-contained, printable

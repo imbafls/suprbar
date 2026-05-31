@@ -37,7 +37,15 @@ jobs:
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
-          & $iscc installer.iss
+          # Single source of truth: derive the installer version from the tag
+          # (refs/tags/vX.Y.Z) so the asset name + metadata never drift from the
+          # release. Falls back to __version__ for workflow_dispatch runs.
+          $ver = "${{ github.ref_name }}" -replace '^v',''
+          if (-not $ver -or $ver -eq "${{ github.ref_name }}") {
+            $ver = (python -c "import suprbar; print(suprbar.__version__)")
+          }
+          Write-Host "Installer version: $ver"
+          & $iscc /DMyAppVersion=$ver installer.iss
 
       - name: Zip portable bundle
         run: |
