@@ -1,5 +1,14 @@
 # supr.bar CHANGELOG
 
+## v0.9.2 — report XSS hardening
+
+- **Fix:** escape the by-project model label (`p.model`) before inserting it
+  into the report DOM. `_model_family()` passes raw model ids through for any
+  model that isn't opus/sonnet/haiku, so a crafted local `~/.claude` transcript
+  `message.model` could execute under `/report`'s inline-script CSP. Completes
+  the output-escaping introduced in v0.9.0 (every other disk-derived string was
+  already escaped). Caught by automated PR review.
+
 ## v0.9.1 — installer version fix
 
 - **Fix:** the v0.9.0 installer asset was mislabeled `suprbar-setup-0.8.0.exe`

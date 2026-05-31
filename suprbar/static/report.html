@@ -582,7 +582,7 @@ $("#byProject").innerHTML = REPORT.byProject.map((p,i)=>{
     '<span class="nm"><span class="rank">'+(p.muted?"":(i+1))+'</span><span class="label" '+(p.muted?'style="color:var(--b-dimmer)"':'')+'>'+esc(p.project)+'</span></span>'+
     '<span class="cost">'+money(p.cost)+'</span>'+
     '<span class="bar"><i style="width:'+(maxProj>0?p.cost/maxProj*100:0)+'%;background:'+col+'"></i></span>'+
-    '<span class="meta">'+intc(p.messages)+' msg · '+p.model+'</span>'+
+    '<span class="meta">'+intc(p.messages)+' msg · '+esc(p.model)+'</span>'+
     '<span class="pct">'+share.toFixed(0)+'%</span>'+
     '</div>';
 }).join("");
