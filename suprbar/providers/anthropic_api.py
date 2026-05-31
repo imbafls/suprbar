@@ -28,7 +28,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .. import config
+from .. import __version__, config
 
 log = logging.getLogger("suprbar.providers.anthropic_api")
 
@@ -78,7 +78,7 @@ def _http_get_once(path: str, params: dict, api_key: str) -> dict:
     req = urllib.request.Request(url, method="GET")
     req.add_header("anthropic-version", ANTHROPIC_VERSION)
     req.add_header("x-api-key", api_key)
-    req.add_header("user-agent", "suprbar/0.1")
+    req.add_header("user-agent", f"suprbar/{__version__}")
     with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
         body = resp.read()
     return json.loads(body.decode("utf-8"))

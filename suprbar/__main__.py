@@ -6,14 +6,16 @@ import logging
 import logging.handlers
 import os
 import signal
-import socket
 import sys
 import threading
-import urllib.error
-import urllib.request
 
 from . import config, server
-from .popup import TrayBridge, run as run_popup
+from .popup import (
+    TrayBridge,
+    acquire_single_instance,
+    release_single_instance,
+    run as run_popup,
+)
 from .tray import TrayApp
 
 DEFAULT_PORT = 47821
@@ -67,34 +69,17 @@ def setup_logging() -> None:
         logging.getLogger("suprbar").warning("file logging disabled: %s", e)
 
 
-def _another_instance_alive(port: int) -> bool:
-    """Best-effort detection: if the port is busy AND /api/ping responds, we
-    consider another suprbar instance to be running."""
-    try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/api/ping", timeout=1.0,
-        ) as resp:
-            if resp.status == 200:
-                return True
-    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
-        return False
-    return False
-
-
 def main() -> int:
     setup_logging()
     log = logging.getLogger("suprbar")
 
-    # Single-instance enforcement: if 47821 is taken AND something on it
-    # answers /api/ping, exit unless SUPRBAR_FORCE=1.
-    force = os.environ.get("SUPRBAR_FORCE", "") == "1"
-    if not force and not server.try_bind(DEFAULT_PORT):
-        if _another_instance_alive(DEFAULT_PORT):
-            log.warning("another suprbar instance is already running on %d "
-                        "(set SUPRBAR_FORCE=1 to override) — exiting",
-                        DEFAULT_PORT)
-            return 0
-        # Else: port busy but not us — start_in_background will pick a free port.
+    # Single-instance guard (Windows named mutex; a no-op on other platforms).
+    # Acquire before binding a port or spawning threads so a duplicate launch
+    # exits cleanly with no side effects. SUPRBAR_FORCE=1 bypasses it.
+    if not acquire_single_instance():
+        log.warning("another suprbar instance is already running "
+                    "(set SUPRBAR_FORCE=1 to override) — exiting")
+        return 0
 
     httpd, port, _ = server.start_in_background(DEFAULT_PORT)
     log.info("http server on 127.0.0.1:%d (pid=%d)", port, os.getpid())
@@ -151,6 +136,7 @@ def main() -> int:
             tray._on_quit(None, None)
         except Exception:
             pass
+        release_single_instance()
 
     return 0
 

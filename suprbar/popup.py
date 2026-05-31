@@ -379,16 +379,8 @@ def _show_webview2_install_dialog() -> None:
 
 class TrayBridge:
     def __init__(self):
-        # Single-instance guard: if another suprbar already owns the named
-        # mutex, bail out *before* we open the webview / tray. Bypass via
-        # SUPRBAR_FORCE=1 for development. Constructing TrayBridge is the
-        # first thing __main__ does, so this is the earliest reliable hook.
-        if not acquire_single_instance():
-            sys.stderr.write(
-                "supr.bar already running (set SUPRBAR_FORCE=1 to override)\n"
-            )
-            sys.exit(0)
-
+        # Single-instance is enforced in __main__.main() via
+        # acquire_single_instance() before any window/tray is created.
         self._window: webview.Window | None = None
         self._hwnd: int = 0
         self._visible = False

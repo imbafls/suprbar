@@ -3,7 +3,7 @@
 Produces:
   docs/brand/mark-{16,24,32,64,128,256,512,1024}.png
   docs/brand/social-card.png    (1200×630)
-  suprbar/static/brand/icon-{16,32,48,64,256}.ico   (for .exe + windows)
+  suprbar/static/brand/suprbar.ico   (multi-size ICO for the .exe + installer)
 
 Run:  python scripts/build_brand.py
 """

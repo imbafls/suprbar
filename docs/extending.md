@@ -4,7 +4,7 @@ supr.bar is a **usage bar** — tray flyout + local data sources. Extension
 points are intentionally small:
 
 1. **Data sources** — plug in Cursor, Codex CLI, OpenAI, etc.
-2. **Themes** — CSS variable overrides in `suprbar/static/themes/`.
+2. **Themes / accents** — CSS variable overrides via `[data-theme]` / `[data-accent]` in `styles.css`.
 3. **Tray menu actions** — optional HTTP-backed menu items (future).
 
 ---
@@ -50,19 +50,22 @@ your scanner adapter or reuse patterns from `suprbar/scanner.py`.
 
 ---
 
-## 2. Themes
+## 2. Themes & accents
 
-Drop a CSS file in `suprbar/static/themes/<name>.css`:
+There is no separate theme-file loader. Light/dark live in `styles.css` under
+`[data-theme="light"]`, and the accent palette under `body[data-accent="…"]`.
+To add an accent:
+
+1. Add the name to the `display.accent` enum in `config.py` `SCHEMA`.
+2. Add a matching block in `suprbar/static/styles.css`:
 
 ```css
-[data-theme="ocean"] {
-  --b-accent: #38bdf8;
-  --b-violet: #6366f1;
+body[data-accent="ocean"] {
+  --b-accent: #38bdf8; --b-accent-hot: #7dd3fc; --b-violet: #6366f1;
 }
 ```
 
-Select it via Settings → Display → Theme (or add to the theme enum in
-`config.py` SCHEMA).
+It then appears as a swatch under Settings → Display → Accent color.
 
 ---
 
@@ -83,9 +86,9 @@ See `suprbar/providers/local.py` and `anthropic_api.py` for full examples.
 
 ---
 
-## Planned: source tabs + filters
+## Planned: per-source filters
 
-The v0.5 rework adds a **source picker** in the flyout (All / Claude Code /
-Anthropic API / …) and optional **project filters** per source. New providers
-should expose `extras.projects` or similar so the UI can filter without
-re-scanning.
+The flyout already shows a per-source breakdown (provider status cards). A
+future rework may add a source picker (All / Claude Code / Anthropic API / …)
+and per-source **project filters**. New providers should expose
+`extras.projects` or similar so the UI can filter without re-scanning.

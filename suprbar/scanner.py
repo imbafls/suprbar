@@ -1,9 +1,10 @@
 """Scan ~/.claude/projects/**/*.jsonl and aggregate Claude Code token usage.
 
-Two main entry points:
-  * scan(days)          — historical aggregate (used by future dashboard)
-  * today_summary()     — today-only state for the MVP flyout: active session,
+Main entry points:
+  * today_summary()     — today-only state for the tray flyout: active session,
                           today's cost, token mix, messages, model, started
+  * range_summary(key)  — usage aggregated over a user-selected time window
+  * budgets_summary()   — spent-vs-limit for day / week / month
 
 Performance notes:
   * Files are parsed in a small thread pool (I/O-bound, not CPU-bound).
@@ -173,9 +174,9 @@ def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
     # 24-element hourly cost/token totals (local-hour from each event ts).
     hourly = [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
               for h in range(24)]
-    # model_id -> {cost, messages, tokens}
+    # model_id -> {cost, messages, tokens, cache_read}
     by_model: dict[str, dict[str, float]] = defaultdict(
-        lambda: {"cost": 0.0, "messages": 0, "tokens": 0})
+        lambda: {"cost": 0.0, "messages": 0, "tokens": 0, "cache_read": 0})
 
     parse_errors = 0
 
@@ -227,6 +228,7 @@ def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
                     sess_model = model
                     by_model[model]["cost"] += fields["cost"]
                     by_model[model]["messages"] += 1
+                    by_model[model]["cache_read"] += fields["cache_read"]
                     by_model[model]["tokens"] += (
                         fields["input"] + fields["output"]
                         + fields["cache_5m"] + fields["cache_1h"]
@@ -292,7 +294,7 @@ def today_summary() -> dict[str, Any]:
     hourly = [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
               for h in range(24)]
     by_model_global: dict[str, dict[str, float]] = defaultdict(
-        lambda: {"cost": 0.0, "messages": 0, "tokens": 0})
+        lambda: {"cost": 0.0, "messages": 0, "tokens": 0, "cache_read": 0})
     # session_id -> dict of session info
     sessions: dict[str, dict] = {}
     # project name -> aggregate
@@ -388,6 +390,7 @@ def today_summary() -> dict[str, Any]:
                 by_model_global[m]["cost"] += agg["cost"]
                 by_model_global[m]["messages"] += agg["messages"]
                 by_model_global[m]["tokens"] += agg["tokens"]
+                by_model_global[m]["cache_read"] += agg.get("cache_read", 0)
 
             sess_last_ts = result["sess_last_ts"]
             if sess_last_ts is None:
@@ -504,6 +507,7 @@ def today_summary() -> dict[str, Any]:
                 "cost": round(agg["cost"], 4),
                 "messages": int(agg["messages"]),
                 "tokens": int(agg["tokens"]),
+                "cache_read": int(agg["cache_read"]),
             }
             for m, agg in sorted(by_model_global.items(),
                                  key=lambda kv: -kv[1]["cost"])
@@ -559,111 +563,6 @@ def _empty_today(started_at: float, files_scanned: int) -> dict[str, Any]:
         "projects_today": 0,
         "top_model_today": None,
         "live_sessions": [],
-    }
-
-
-# ---------- historical scan (kept for future dashboard use) ----------
-
-def scan(days: int = 30) -> dict[str, Any]:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    started = time.time()
-    by_day: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(_zero_bucket))
-    by_project: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(_zero_bucket))
-    totals: dict[str, dict] = defaultdict(_zero_bucket)
-    sessions: set[str] = set()
-    files_scanned = 0
-    messages = 0
-    parse_errors = 0
-
-    if not CLAUDE_HOME.exists():
-        return _empty_scan(days, started)
-
-    for path in CLAUDE_HOME.rglob("*.jsonl"):
-        files_scanned += 1
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                proj = _project_name(path)
-                for raw in f:
-                    line = raw.strip()
-                    if not line:
-                        continue
-                    if '"usage"' not in line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except json.JSONDecodeError:
-                        parse_errors += 1
-                        continue
-                    msg = rec.get("message") or {}
-                    usage = msg.get("usage")
-                    if not usage:
-                        continue
-                    dt = _parse_ts(rec.get("timestamp"))
-                    if not dt or dt < cutoff:
-                        continue
-                    model = msg.get("model", "") or ""
-                    fam = family_for(model)
-                    day = dt.date().isoformat()
-                    sid = rec.get("sessionId")
-                    if sid:
-                        sessions.add(sid)
-                    messages += 1
-                    fields = _extract_usage_fields(usage, model)
-                    _add(by_day[day][fam], fields)
-                    _add(by_project[proj][fam], fields)
-                    _add(totals[fam], fields)
-        except OSError:
-            continue
-
-    grand_cost = sum(t["cost"] for t in totals.values())
-    grand_tokens = sum(
-        t["input"] + t["output"] + t["cache_5m"] + t["cache_1h"] + t["cache_read"]
-        for t in totals.values()
-    )
-
-    return {
-        "days": days,
-        "cutoff": cutoff.isoformat(),
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "scan_ms": int((time.time() - started) * 1000),
-        "files_scanned": files_scanned,
-        "messages": messages,
-        "parse_errors": parse_errors,
-        "sessions": len(sessions),
-        "grand_tokens": int(grand_tokens),
-        "grand_cost": round(grand_cost, 4),
-        "totals": {k: _serialize(v) for k, v in totals.items()},
-        "by_day": {
-            day: {fam: _serialize(b) for fam, b in fams.items()}
-            for day, fams in sorted(by_day.items())
-        },
-        "by_project": {
-            proj: {
-                "totals": _proj_totals(fams),
-                "families": {fam: _serialize(b) for fam, b in fams.items()},
-            }
-            for proj, fams in sorted(
-                by_project.items(),
-                key=lambda kv: -sum(b["cost"] for b in kv[1].values()),
-            )
-        },
-    }
-
-
-def _proj_totals(fams: dict) -> dict:
-    out = _zero_bucket()
-    for b in fams.values():
-        _add(out, b)
-    return _serialize(out)
-
-
-def _empty_scan(days: int, started: float) -> dict:
-    return {
-        "days": days, "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "scan_ms": int((time.time() - started) * 1000),
-        "files_scanned": 0, "messages": 0, "sessions": 0, "parse_errors": 0,
-        "grand_tokens": 0, "grand_cost": 0.0,
-        "totals": {}, "by_day": {}, "by_project": {},
     }
 
 

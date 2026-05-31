@@ -10,7 +10,7 @@ sources** and bug fixes with reproducers.
 |---|---|---|
 | **New data source** in `suprbar/providers/` | medium | ★★★★★ |
 | **Bug report** with a reproducer JSONL snippet | small | ★★★★ |
-| **New theme** in `suprbar/static/themes/` | small | ★★★ |
+| **New accent / theme** (`config.py` enum + `styles.css` `[data-accent]`) | small | ★★★ |
 | **Docs fix** | tiny | ★★★ |
 | **UI polish** on the usage flyout | medium | ★★ |
 | **Large refactor** | large | ★ (open an issue first) |

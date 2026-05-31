@@ -29,44 +29,25 @@ def config_dir() -> Path:
     return Path(base) / "suprbar"
 
 
-def local_data_dir() -> Path:
-    """%LOCALAPPDATA%\\suprbar on Windows; ~/.local/share/suprbar elsewhere."""
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    else:
-        base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "suprbar"
-
-
 def config_path() -> Path:
     return config_dir() / "config.json"
 
 
-def window_state_path() -> Path:
-    return local_data_dir() / "window-state.json"
-
-
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DEFAULTS: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
 
-    # ---- Sources (unchanged contract) ----
+    # ---- Sources ----
     "sources": {
         "local": {"enabled": True},
         "anthropic_api": {
             "enabled": False,
             "admin_key_enc": "",        # DPAPI-encrypted blob (base64)
-            "poll_seconds": 60,         # Admin API poll cadence
         },
-        # How equivalent vs actual cost is computed (display hint, not auth).
-        # equivalent = JSONL-derived (what an API user would have paid)
-        # actual_api = only what comes from the Admin API
-        # both      = sum, with breakdown shown
-        "cost_mode": "equivalent",
     },
 
-    # ---- Legacy ui keys still honored (pinned + start_on_login) ----
+    # ---- Tray + startup ----
     "ui": {
         "pinned": False,
         "start_on_login": False,
@@ -74,27 +55,21 @@ DEFAULTS: dict[str, Any] = {
 
     # ---- Time range / filter prefs ----
     "range": {
-        # default range applied when popup opens
-        "default": "today",            # today|yesterday|24h|7d|30d|90d|custom
-        "custom_start": None,          # ISO date YYYY-MM-DD or null
-        "custom_end":   None,
+        "default": "today",            # today|24h|7d|week|month|30d|90d
         "week_starts_on": "mon",       # sun|mon
         "day_boundary":  "local",      # local|utc
         "rolling_24h":   False,        # true → last 24h instead of calendar day
         "include_weekends": True,
-        "compare_previous": "off",     # off|prev_day|prev_week|prev_month
     },
 
     # ---- Display prefs ----
     "display": {
         "theme":       "dark",         # dark|light|auto
-        "accent":      "violet",       # violet|blue|green|orange|pink
+        "accent":      "orange",       # violet|blue|green|orange|pink (orange = supr default)
         "density":     "normal",       # compact|normal|spacious
         "font_scale":  1.0,            # 0.85..1.25
-        "currency":    "USD",          # USD|EUR|GBP|JPY|CAD|AUD
         "cost_format": "with_cents",   # with_cents|whole
         "token_format": "compact",     # compact (1.2k) | full (1,234)
-        "locale":      "en-US",
         "show_token_bar":  True,
         "show_cache_info": True,
         "show_burn_rate":  True,
@@ -110,27 +85,19 @@ DEFAULTS: dict[str, Any] = {
         "weekly_limit":  0.0,
         "monthly_limit": 0.0,
         "alert_at_pct":  80,           # alert when >= this % of any active limit
-        "notify":        True,         # show toast alert
-        "tray_warn_color": True,       # turn tray icon red on warning
-        "audio_alert":   False,
-        "quiet_hours":   "off",        # off|22-08|23-07|00-09|custom
-        "quiet_start":   22,
-        "quiet_end":     8,
+        "notify":        True,         # toast when a budget crosses its threshold
+        "tray_warn_color": True,       # tint tray icon amber/red on warning
     },
 
     # ---- Behavior ----
     "behavior": {
-        "refresh_seconds":       5,    # 0=manual, 5/15/30/60/300
+        "refresh_seconds":       5,    # 0=manual, else auto-refresh cadence (s)
         "auto_hide":             True, # auto-hide popup on blur
         "auto_hide_delay_ms":    0,    # delay before auto-hide
         "always_on_top":         True,
-        "show_in_taskbar":       False,
         "live_threshold_seconds": 60,  # JSONL mtime within X = "live"
-        "start_minimized":       True, # tray-only on boot (no popup)
         "confirm_quit":          False,
         "click_through":         False, # popup transparent to clicks
-        "single_instance":       True,
-        "open_dashboard_on_click": True, # left-click tray opens popup
     },
 
     # ---- Project filters ----
@@ -141,36 +108,15 @@ DEFAULTS: dict[str, Any] = {
         "top_n":     10,               # limit list to top N by cost
     },
 
-    # ---- Keyboard shortcuts (in-popup; global hotkeys reserved for later) ----
-    "keyboard": {
-        "enable_global":    False,     # OS-wide hotkeys (not yet wired)
-        "hotkey_toggle":    "Ctrl+Alt+S",
-        "hotkey_refresh":   "F5",
-        "hotkey_settings":  "Ctrl+,",
-        "hotkey_quit":      "Alt+Q",
-        "hotkey_export":    "Ctrl+E",
-        "hotkey_copy_cost": "Ctrl+C",
-        "vim_keys":         False,     # j/k navigation in lists
-    },
-
     # ---- Data / privacy ----
     "data": {
-        "log_level":         "INFO",   # OFF|ERROR|WARN|INFO|DEBUG
-        "log_retention_days": 7,
-        "anonymize_logs":    False,
-        "cache_ttl_seconds": 4,
-        "telemetry":         False,    # reserved; off by default
+        "log_level": "INFO",           # OFF|ERROR|WARN|INFO|DEBUG
     },
 
-    # ---- Window placement ----
+    # ---- Window size ----
     "window": {
-        "anchor":   "bottom-right",   # bottom-right|top-right|bottom-left|top-left|top-center|center
-        "margin_px": 12,
-        "preferred_monitor": 0,        # 0 = monitor with cursor, 1..N = explicit
-        "remember_position": True,
         "width":   360,
         "height":  480,
-        "opacity": 1.0,                # 0.5..1.0
     },
 }
 
@@ -249,6 +195,41 @@ def _deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> None:
             dst[k] = v
 
 
+# Settings removed in schema v3 (the v0.7 simplification). Pruned from any
+# older config on load so the on-disk file converges on the lean schema and the
+# settings UI never renders a control the backend ignores.
+_REMOVED_SECTIONS = ("keyboard",)
+_REMOVED_KEYS: dict[str, tuple[str, ...]] = {
+    "range":    ("compare_previous", "custom_start", "custom_end"),
+    "display":  ("currency", "locale"),
+    "budgets":  ("audio_alert", "quiet_hours", "quiet_start", "quiet_end"),
+    "behavior": ("show_in_taskbar", "start_minimized", "single_instance",
+                 "open_dashboard_on_click"),
+    "data":     ("log_retention_days", "anonymize_logs", "cache_ttl_seconds",
+                 "telemetry"),
+    "window":   ("anchor", "margin_px", "preferred_monitor",
+                 "remember_position", "opacity"),
+    "sources":  ("cost_mode",),
+}
+_VALID_RANGE_DEFAULTS = ("today", "24h", "7d", "week", "month", "30d", "90d")
+
+
+def _prune_removed_keys(d: dict[str, Any]) -> None:
+    for section in _REMOVED_SECTIONS:
+        d.pop(section, None)
+    for section, keys in _REMOVED_KEYS.items():
+        sub = d.get(section)
+        if isinstance(sub, dict):
+            for k in keys:
+                sub.pop(k, None)
+    src = d.get("sources")
+    if isinstance(src, dict) and isinstance(src.get("anthropic_api"), dict):
+        src["anthropic_api"].pop("poll_seconds", None)
+    rng = d.get("range")
+    if isinstance(rng, dict) and rng.get("default") not in _VALID_RANGE_DEFAULTS:
+        rng["default"] = "today"
+
+
 def _migrate(d: dict[str, Any]) -> dict[str, Any]:
     """Bump older configs to the current schema."""
     if not isinstance(d, dict):
@@ -262,10 +243,15 @@ def _migrate(d: dict[str, Any]) -> dict[str, Any]:
         d["schema_version"] = 1
         log.info("config migrated to schema_version=1")
     if d.get("schema_version") == 1:
-        # v1 → v2: introduce range/display/budgets/behavior/projects/keyboard/data/window
-        # We don't have to write defaults here — _merge_defaults handles that.
+        # v1 → v2: introduce range/display/budgets/behavior/projects/data/window.
+        # _merge_defaults fills the new sections in.
         d["schema_version"] = 2
         log.info("config migrated to schema_version=2")
+    if d.get("schema_version") == 2:
+        # v2 → v3: drop ~32 settings that were never wired (the v0.7 trim).
+        _prune_removed_keys(d)
+        d["schema_version"] = 3
+        log.info("config migrated to schema_version=3")
     return d
 
 
@@ -356,24 +342,19 @@ def set_pref(path: str, value: Any) -> Any:
 # (key path) -> (type, allowed values | (lo, hi) | None)
 SCHEMA: dict[str, tuple[str, Any]] = {
     # range
-    "range.default":          ("enum", ("today", "yesterday", "24h", "7d", "30d", "90d", "custom")),
-    "range.custom_start":     ("date_or_null", None),
-    "range.custom_end":       ("date_or_null", None),
+    "range.default":          ("enum", ("today", "24h", "7d", "week", "month", "30d", "90d")),
     "range.week_starts_on":   ("enum", ("sun", "mon")),
     "range.day_boundary":     ("enum", ("local", "utc")),
     "range.rolling_24h":      ("bool", None),
     "range.include_weekends": ("bool", None),
-    "range.compare_previous": ("enum", ("off", "prev_day", "prev_week", "prev_month")),
 
     # display
     "display.theme":          ("enum", ("dark", "light", "auto")),
     "display.accent":         ("enum", ("violet", "blue", "green", "orange", "pink")),
     "display.density":        ("enum", ("compact", "normal", "spacious")),
     "display.font_scale":     ("float", (0.85, 1.25)),
-    "display.currency":       ("enum", ("USD", "EUR", "GBP", "JPY", "CAD", "AUD")),
     "display.cost_format":    ("enum", ("with_cents", "whole")),
     "display.token_format":   ("enum", ("compact", "full")),
-    "display.locale":         ("str", None),
     "display.show_token_bar":     ("bool", None),
     "display.show_cache_info":    ("bool", None),
     "display.show_burn_rate":     ("bool", None),
@@ -389,23 +370,15 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     "budgets.alert_at_pct":   ("int", (1, 100)),
     "budgets.notify":         ("bool", None),
     "budgets.tray_warn_color": ("bool", None),
-    "budgets.audio_alert":    ("bool", None),
-    "budgets.quiet_hours":    ("enum", ("off", "22-08", "23-07", "00-09", "custom")),
-    "budgets.quiet_start":    ("int", (0, 23)),
-    "budgets.quiet_end":      ("int", (0, 23)),
 
     # behavior
     "behavior.refresh_seconds":      ("int", (0, 3600)),
     "behavior.auto_hide":            ("bool", None),
     "behavior.auto_hide_delay_ms":   ("int", (0, 10000)),
     "behavior.always_on_top":        ("bool", None),
-    "behavior.show_in_taskbar":      ("bool", None),
     "behavior.live_threshold_seconds": ("int", (5, 600)),
-    "behavior.start_minimized":      ("bool", None),
     "behavior.confirm_quit":         ("bool", None),
     "behavior.click_through":        ("bool", None),
-    "behavior.single_instance":      ("bool", None),
-    "behavior.open_dashboard_on_click": ("bool", None),
 
     # projects
     "projects.allowlist":     ("list_str", None),
@@ -413,43 +386,20 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     "projects.anonymize":     ("bool", None),
     "projects.top_n":         ("int", (1, 100)),
 
-    # keyboard
-    "keyboard.enable_global":    ("bool", None),
-    "keyboard.hotkey_toggle":    ("str", None),
-    "keyboard.hotkey_refresh":   ("str", None),
-    "keyboard.hotkey_settings":  ("str", None),
-    "keyboard.hotkey_quit":      ("str", None),
-    "keyboard.hotkey_export":    ("str", None),
-    "keyboard.hotkey_copy_cost": ("str", None),
-    "keyboard.vim_keys":         ("bool", None),
-
     # data
     "data.log_level":          ("enum", ("OFF", "ERROR", "WARN", "INFO", "DEBUG")),
-    "data.log_retention_days": ("int", (1, 365)),
-    "data.anonymize_logs":     ("bool", None),
-    "data.cache_ttl_seconds":  ("int", (1, 60)),
-    "data.telemetry":          ("bool", None),
 
     # window
-    "window.anchor":            ("enum", ("bottom-right", "top-right",
-                                          "bottom-left", "top-left",
-                                          "top-center", "center")),
-    "window.margin_px":         ("int", (0, 200)),
-    "window.preferred_monitor": ("int", (0, 16)),
-    "window.remember_position": ("bool", None),
     "window.width":             ("int", (260, 800)),
     "window.height":            ("int", (320, 1200)),
-    "window.opacity":           ("float", (0.5, 1.0)),
 
-    # legacy ui (still accepted for back-compat)
+    # tray + startup
     "ui.pinned":         ("bool", None),
     "ui.start_on_login": ("bool", None),
 
-    # sources sub-fields
+    # sources
     "sources.local.enabled":               ("bool", None),
     "sources.anthropic_api.enabled":       ("bool", None),
-    "sources.anthropic_api.poll_seconds":  ("int", (10, 3600)),
-    "sources.cost_mode":                   ("enum", ("equivalent", "actual_api", "both")),
 }
 
 
@@ -608,10 +558,6 @@ def auto_hide_enabled() -> bool:
     return bool(get_pref("behavior.auto_hide", True))
 
 
-def click_through() -> bool:
-    return bool(get_pref("behavior.click_through", False))
-
-
 def project_allowlist() -> list[str]:
     v = get_pref("projects.allowlist", [])
     return v if isinstance(v, list) else []
@@ -624,50 +570,6 @@ def project_denylist() -> list[str]:
 
 def anonymize_projects() -> bool:
     return bool(get_pref("projects.anonymize", False))
-
-
-# ---------- Window state (popup pos/size/pinned) ----------
-
-_WINDOW_DEFAULT: dict[str, Any] = {
-    "x": None, "y": None, "w": None, "h": None, "pinned": False,
-}
-
-
-def load_window_state() -> dict[str, Any]:
-    p = window_state_path()
-    if not p.exists():
-        return dict(_WINDOW_DEFAULT)
-    try:
-        raw = json.loads(p.read_text("utf-8"))
-        if not isinstance(raw, dict):
-            return dict(_WINDOW_DEFAULT)
-        out = dict(_WINDOW_DEFAULT)
-        for k in _WINDOW_DEFAULT.keys():
-            if k in raw:
-                out[k] = raw[k]
-        return out
-    except (OSError, json.JSONDecodeError):
-        return dict(_WINDOW_DEFAULT)
-
-
-def save_window_state(state: dict[str, Any]) -> dict[str, Any]:
-    p = window_state_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    cur = load_window_state()
-    for k in _WINDOW_DEFAULT.keys():
-        if k in state:
-            v = state[k]
-            if k == "pinned":
-                cur[k] = bool(v)
-            else:
-                try:
-                    cur[k] = int(v) if v is not None else None
-                except (TypeError, ValueError):
-                    pass
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cur, indent=2), encoding="utf-8")
-    os.replace(tmp, p)
-    return cur
 
 
 # ---------- Windows "Run on login" registry helper ----------

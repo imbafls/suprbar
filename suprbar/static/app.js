@@ -1,9 +1,10 @@
 // supr.bar — flyout client logic
 //
 // Data source: /api/today returns the aggregator response shape
-// ({today, sources, active, last_session_seen}). Re-rendered every 5s and on
-// focus. Keyboard: Esc closes, F5 refreshes, Alt+Q quits, ? help, Ctrl+L
-// focuses key field, Ctrl+E exports CSV, Ctrl+W closes.
+// ({today, sources, active, live_sessions, last_session_seen}). Re-rendered
+// every 5s and on focus. Keyboard: Esc closes, F5/Space refresh, Alt+Q quits,
+// ? help, Ctrl+L opens logs, Ctrl+K focuses key field, Ctrl+E exports CSV,
+// Ctrl+W closes, 1–7 switch ranges.
 
 // Idempotency guard — multiple script injections should be safe.
 if (window.__suprbar_inited) {
@@ -18,8 +19,13 @@ const POLL_MS_HIDDEN = 60000;
 let pollTimer = null;
 let pollInterval = POLL_MS_ACTIVE;
 
+// Mirror of prefs.display, kept current by applyDisplayPrefs() so the
+// formatters below can honor cost_format / token_format without a lookup.
+let displayPrefs = {};
+
 function fmtTokens(n) {
   n = Number(n || 0);
+  if (displayPrefs.token_format === 'full') return n.toLocaleString();
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
@@ -28,6 +34,9 @@ function fmtTokens(n) {
 
 function fmtCost(n) {
   n = Number(n || 0);
+  if (displayPrefs.cost_format === 'whole') {
+    return { whole: Math.round(n).toLocaleString(), cents: '' };
+  }
   const whole = Math.floor(n);
   const cents = (n - whole).toFixed(2).slice(1);
   return { whole: whole.toLocaleString(), cents };
@@ -75,41 +84,91 @@ let lastData = null;
 let lastCost = 0;
 let costAnimFrame = null;
 let firstRenderDone = false;
+let lastRefreshAt = null;
+let todayEtag = null;
+let appMeta = {};
 
 // ───────────────────────── Toast system (#2) ─────────────────────────
 
 let _toastTimer = null;
 function toast(msg, kind = 'ok', ms = 2400) {
   if (!msg) return;
-  let el = document.getElementById('toast');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'toast';
-    el.style.cssText = [
-      'position:fixed', 'bottom:14px', 'left:50%', 'transform:translateX(-50%)',
-      'background:rgba(28,30,38,0.96)', 'color:#f4f5f7',
-      'font-family:Geist Mono,ui-monospace,monospace', 'font-size:11px',
-      'padding:7px 12px', 'border-radius:6px',
-      'border:1px solid rgba(255,255,255,0.1)',
-      'box-shadow:0 6px 20px rgba(0,0,0,0.5)',
-      'opacity:0', 'transition:opacity 160ms ease', 'pointer-events:none',
-      'z-index:9999', 'max-width:80%', 'text-align:center',
-    ].join(';');
-    document.body.appendChild(el);
-  }
+  const el = document.getElementById('toast');
+  if (!el) return;
   el.textContent = msg;
-  el.dataset.kind = kind;
-  // colour based on kind
-  if (kind === 'err')   el.style.borderColor = 'rgba(248,113,113,0.55)';
-  else if (kind === 'warn') el.style.borderColor = 'rgba(251,191,36,0.55)';
-  else                  el.style.borderColor = 'rgba(74,222,128,0.45)';
-  el.classList.add('show');
-  el.style.opacity = '1';
+  el.classList.remove('ok', 'err', 'warn', 'show');
+  el.classList.add(kind === 'err' ? 'err' : kind === 'warn' ? 'warn' : 'ok', 'show');
+  el.hidden = false;
   if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => {
-    el.style.opacity = '0';
     el.classList.remove('show');
+    el.hidden = true;
   }, ms);
+}
+
+function openPath(p) {
+  if (!p) return;
+  fetch('/api/open-path', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p }),
+  }).catch(() => {});
+}
+
+function setConnBanner(show, text) {
+  const b = document.getElementById('connBanner');
+  const t = document.getElementById('connBannerText');
+  if (!b) return;
+  if (!show) {
+    b.hidden = true;
+    document.body.classList.remove('offline');
+    return;
+  }
+  b.hidden = false;
+  document.body.classList.add('offline');
+  if (t && text) t.textContent = text;
+}
+
+function getTopN() {
+  const n = Number(prefsCache?.projects?.top_n);
+  return Number.isFinite(n) && n > 0 ? Math.min(24, Math.floor(n)) : 8;
+}
+
+function updateProjectsTitle(d) {
+  const el = document.getElementById('projectsListTitle');
+  if (!el) return;
+  const isToday = !!(d.today || !window.__suprbar_range || window.__suprbar_range === 'today');
+  const label = d.range?.label || currentRange || 'range';
+  el.textContent = isToday ? 'Top projects today' : `Top projects · ${label}`;
+}
+
+function renderStatusStrip(d) {
+  const el = document.getElementById('statusStrip');
+  if (!el) return;
+  const cm = d.cache_meta || {};
+  const insights = d.insights || {};
+  const parts = [];
+  if (cm.fresh === false) parts.push({ t: 'stale cache', warn: true });
+  if (Number(d.parse_errors || 0) > 0) {
+    parts.push({ t: `${d.parse_errors} parse err`, warn: true });
+  }
+  if (insights.sessions_today != null) parts.push({ t: `${insights.sessions_today} sessions` });
+  if (insights.projects_today != null) parts.push({ t: `${insights.projects_today} projects` });
+  if (lastRefreshAt) {
+    parts.push({ t: 'updated ' + fmtAgo((Date.now() - lastRefreshAt) / 1000) });
+  }
+  const scanMs = cm.last_scan_ms ?? d.elapsed_ms;
+  if (scanMs != null) parts.push({ t: `scan ${scanMs}ms` });
+  el.innerHTML = parts.map(p =>
+    `<span class="status-pill${p.warn ? ' warn' : ''}">${escape(p.t)}</span>`,
+  ).join('');
+  el.hidden = !parts.length;
+}
+
+function rememberSources(sources) {
+  if (Array.isArray(sources) && sources.length) {
+    window.__suprbar_last_sources = sources;
+  }
 }
 
 // ───────────────────────── Count-up animation (#1) ─────────────────────────
@@ -173,7 +232,8 @@ function renderLiveSessions(d) {
     const burnTxt = burn > 0 ? `$${burn.toFixed(2)}/h` : '—';
     const age = s.last_activity ? fmtAgo((Date.now() - new Date(s.last_activity).getTime()) / 1000) : 'live';
     const rowCls = i === 0 ? 'live-row primary' : 'live-row';
-    return `<div class="${rowCls}" title="${escapeAttr(s.path || s.project || '')}">
+    const pathAttr = s.path ? ` data-path="${escapeAttr(s.path)}"` : '';
+    return `<div class="${rowCls}"${pathAttr} title="${escapeAttr(s.path || s.project || '')} · click to open">
       <div class="live-row-main">
         <span class="live-proj">${escape(shortProject(s.project))}</span>
         <span class="live-cost">$${Number(s.cost_today || 0).toFixed(2)}</span>
@@ -227,6 +287,8 @@ function renderImpactStrip(d) {
   set('iProjected', cost > 0 ? fmtMoney(projected) : '—');
   set('iAvgMsg', messages > 0 ? fmtMoney(Number(insights.cost_per_message || 0) || cost / messages, 3) : '—');
   set('iSaved', Number(insights.cache_savings_usd || t.cache_savings_usd || 0) > 0 ? fmtMoney(insights.cache_savings_usd || t.cache_savings_usd) : '—');
+  const share = Number(insights.top_project_share || 0);
+  set('iTopProj', share > 0 ? fmtPct(share) : '—');
 }
 
 function renderHourlySparkline(hourly) {
@@ -275,7 +337,7 @@ function renderSourceCards(sources) {
 function renderProjectList(d) {
   const list = document.getElementById('projectsListItems');
   if (!list) return;
-  const rows = projectRowsFromPayload(d).slice(0, 8);
+  const rows = projectRowsFromPayload(d).slice(0, getTopN());
   if (!rows.length) {
     list.innerHTML = '';
     return;
@@ -398,13 +460,21 @@ function render(d) {
   }
 
   // Live sessions panel (all JSONL touched within live window)
+  rememberSources(sources);
   renderImpactStrip(d);
   renderHourlySparkline(d.hourly);
   renderSourceCards(sources);
   renderLiveSessions(d);
+  renderStatusStrip(d);
+  updateProjectsTitle(d);
 
   // Active vs Idle
   const liveSessions = Array.isArray(d.live_sessions) ? d.live_sessions : [];
+  const sessEl = document.getElementById('mSessions');
+  if (sessEl) {
+    const n = d.insights?.sessions_today ?? liveSessions.length ?? (d.active ? 1 : 0);
+    sessEl.textContent = Number(n || 0).toLocaleString();
+  }
   const nLive = liveSessions.length;
   document.body.classList.toggle('has-live', nLive > 0);
   document.body.classList.toggle('has-parse-errors', Number(d.parse_errors || 0) > 0);
@@ -431,7 +501,8 @@ function render(d) {
     const proj = head?.project || '~/.claude';
     const scanMs = d.cache_meta?.last_scan_ms ?? d.elapsed_ms ?? 0;
     const parse = Number(d.parse_errors || 0);
-    setT('footMeta', `${shortProject(proj)} · scan ${scanMs}ms${parse ? ` · ${parse} parse err` : ''}`);
+    const projPart = displayPrefs.show_project === false ? '' : `${shortProject(proj)} · `;
+    setT('footMeta', `${projPart}scan ${scanMs}ms${parse ? ` · ${parse} parse err` : ''}`);
   } else {
     if (live) {
       live.hidden = false;
@@ -509,18 +580,29 @@ async function load({ refresh = false } = {}) {
   const signal = inflightController.signal;
 
   try {
+    const headers = {};
+    if (todayEtag && !refresh) headers['If-None-Match'] = todayEtag;
     const res = await fetch(
       refresh ? '/api/today?refresh=1' : '/api/today',
-      { cache: 'no-store', signal },
+      { cache: 'no-store', signal, headers },
     );
+    if (res.status === 304) {
+      lastRefreshAt = Date.now();
+      setConnBanner(false);
+      return;
+    }
     if (!res.ok) {
       const msg = statusMessage(res.status);
       // surface obvious problems
       if (res.status === 401 || res.status === 403) toast(msg, 'err');
       throw new Error('http ' + res.status);
     }
+    const etag = res.headers.get('ETag');
+    if (etag) todayEtag = etag;
     const data = await res.json();
     render(data);
+    lastRefreshAt = Date.now();
+    setConnBanner(false);
     // success — reset backoff
     consecutiveFailures = 0;
     nextBackoff = 1000;
@@ -529,6 +611,7 @@ async function load({ refresh = false } = {}) {
     if (e?.name === 'AbortError') return;
     consecutiveFailures++;
     const msg = statusMessage(0, String(e?.message || e));
+    setConnBanner(true, 'Offline — ' + msg);
     if (consecutiveFailures === 3) {
       toast('connection lost — ' + msg, 'err', 3200);
     }
@@ -551,7 +634,6 @@ async function loadConfig() {
     if (!res.ok) return;
     const c = await res.json();
     const anth = c.sources?.anthropic_api || {};
-    setToggle($('anthropicToggle'), !!anth.enabled);
     const adm = $('adminKeyInput');
     if (adm) {
       adm.value = '';
@@ -559,41 +641,9 @@ async function loadConfig() {
         ? `saved: ${anth.key_fingerprint || '••••'}`
         : 'sk-ant-admin01-…';
     }
-
-    const ui = c.ui || {};
-    setToggle($('pinnedToggle'), !!ui.pinned);
-    setToggle($('startupToggle'), !!ui.start_on_login);
-    syncPinButton(!!ui.pinned);
-
-    // #13 — per-source view (read from /api/today response cached in lastData)
-    renderSourcesPanel();
+    syncPinButton(!!(c.ui || {}).pinned);
   } catch (e) { /* swallow */ }
 }
-
-function renderSourcesPanel() {
-  const host = document.getElementById('sourcesPanel');
-  if (!host || !lastData) return;
-  const sources = lastData.sources || [];
-  host.innerHTML = sources.map(s => {
-    const status = s.ok
-      ? `<span class="status-line ok">ok</span>`
-      : `<span class="status-line err">${escape(s.error || 'error')}</span>`;
-    const cost = s.ok ? `$${(s.cost_today || 0).toFixed(2)}` : '—';
-    const updated = s.last_updated ? fmtAgo((Date.now() - new Date(s.last_updated).getTime())/1000) : '';
-    return `<div class="settings-row"><div class="settings-row-main">
-      <div class="lbl">${escape(s.label || s.id)} <span class="pill">${escape(s.id)}</span></div>
-      <div class="desc">${cost} ${updated ? '· ' + escape(updated) : ''}</div>
-      ${status}
-    </div></div>`;
-  }).join('');
-}
-
-function setToggle(el, on) {
-  if (!el) return;
-  el.classList.toggle('on', !!on);
-  el.dataset.on = on ? '1' : '0';
-}
-function toggleValue(el) { return el?.classList.contains('on'); }
 
 async function patchConfig(body) {
   try {
@@ -620,30 +670,70 @@ async function patchConfig(body) {
   }
 }
 
-function applyTabOrder() {                            // #9
-  const order = [
-    'adminKeyInput', 'testKeyBtn', 'clearKeyBtn',
-    'anthropicToggle', 'pinnedToggle', 'startupToggle',
-    'settingsCloseBtn',
-  ];
+function applyTabOrder() {
+  const order = ['adminKeyInput', 'testKeyBtn', 'clearKeyBtn', 'settingsCloseBtn'];
   order.forEach((id, i) => {
     const el = document.getElementById(id);
     if (el) el.setAttribute('tabindex', String(i + 1));
   });
 }
 
-function openSettings() {
+function showSettingsStatus(kind, message) {
+  const el = document.getElementById('settingsStatus');
+  if (!el) return;
+  if (kind === 'ready' || !kind) {
+    el.hidden = true;
+    el.textContent = '';
+    el.className = 'settings-status';
+    return;
+  }
+  el.hidden = false;
+  el.className = 'settings-status ' + kind;
+  el.textContent = message || '';
+}
+
+async function openSettings() {
   if (!overlay) return;
   overlay.hidden = false;
+  const search = document.getElementById('settingsSearch');
+  if (search) search.value = '';
+  showSettingsStatus('loading', 'Loading settings…');
+  document.getElementById('settingsSections')?.replaceChildren();
+  document.getElementById('settingsQuick')?.replaceChildren();
+  document.getElementById('settingsNav')?.replaceChildren();
   loadConfig();
-  applyTabOrder();                                     // #9
-  // #10 — auto-focus admin key after overlay shown
+  try {
+    await loadPrefs(true);
+    if (!schemaCache?.length) {
+      throw new Error('Settings schema unavailable');
+    }
+    renderSettingsQuick();
+    renderSettingsNav();
+    renderSettings();
+    applySettingsSearch('');
+    showSettingsStatus('ready');
+  } catch (e) {
+    showSettingsStatus('error', (e?.message || e) + ' — check that suprbar is running.');
+    const host = document.getElementById('settingsSections');
+    if (host) {
+      host.innerHTML = `<div class="settings-error-card">
+        <p>Could not load preferences.</p>
+        <button type="button" class="btn-sm" id="settingsRetryBtn">Retry</button>
+      </div>`;
+      document.getElementById('settingsRetryBtn')?.addEventListener('click', () => openSettings(), { once: true });
+    }
+  }
+  loadDiagnostics();
+  applyTabOrder();
   setTimeout(() => {
-    const k = document.getElementById('adminKeyInput');
-    if (k) try { k.focus(); } catch (_) { /* ignore */ }
+    const s = document.getElementById('settingsSearch');
+    if (s) try { s.focus(); } catch (_) { /* ignore */ }
   }, 50);
 }
-function closeSettings() { if (overlay) overlay.hidden = true; }
+function closeSettings() {
+  if (overlay) overlay.hidden = true;
+  showSettingsStatus('ready');
+}
 
 function syncPinButton(on) {
   $('pinBtn')?.classList.toggle('on', !!on);
@@ -690,30 +780,7 @@ $('pinBtn')?.addEventListener('click', async () => {
   await patchConfig({ pinned: next });
 });
 
-$('anthropicToggle')?.addEventListener('click', async () => {
-  const next = !toggleValue($('anthropicToggle'));
-  setToggle($('anthropicToggle'), next);
-  await patchConfig({ anthropic_api_enabled: next });
-  load({ refresh: true });
-});
-
-$('pinnedToggle')?.addEventListener('click', async () => {
-  const next = !toggleValue($('pinnedToggle'));
-  setToggle($('pinnedToggle'), next);
-  await patchConfig({ pinned: next });
-  syncPinButton(next);
-});
-
-$('startupToggle')?.addEventListener('click', async () => {
-  const next = !toggleValue($('startupToggle'));
-  setToggle($('startupToggle'), next);
-  const r = await patchConfig({ start_on_login: next });
-  if (!r) {
-    setToggle($('startupToggle'), !next);
-  }
-});
-
-async function runTestKey() {                          // factored for #11
+async function runTestKey() {
   const key = $('adminKeyInput')?.value.trim();
   if (!key) {
     setKeyStatus('paste a key first', 'err');
@@ -730,7 +797,6 @@ async function runTestKey() {                          // factored for #11
     if (j.ok) {
       await patchConfig({ anthropic_api_key: key, anthropic_api_enabled: true });
       setKeyStatus('saved & connected', 'ok');
-      setToggle($('anthropicToggle'), true);
       $('adminKeyInput').value = '';
       loadConfig();
       load({ refresh: true });
@@ -805,11 +871,23 @@ $('copySummaryBtn')?.addEventListener('click', copySummary);
 
 // ───────────────────────── CSV export (#5) ─────────────────────────
 
+function downloadCSV(filename, csv) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+}
+
 function exportTodayCSV() {
   const d = lastData || {};
   const today = d.today || {};
   const date = new Date().toISOString().slice(0, 10);
-  const sessions = (d.last_session_seen ? 1 : 0) + (d.active ? 1 : 0);
+  const sessions = d.insights?.sessions_today
+    ?? (Array.isArray(d.live_sessions) ? d.live_sessions.length : 0);
   const headers = ['date','cost','messages','input_tokens','output_tokens','cache_5m','cache_1h','cache_read','sessions'];
   const row = [
     date,
@@ -823,22 +901,93 @@ function exportTodayCSV() {
     sessions,
   ];
   const csv = headers.join(',') + '\n' + row.join(',') + '\n';
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `suprbar-today-${date}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+  downloadCSV(`suprbar-today-${date}.csv`, csv);
   toast('CSV downloaded');
+}
+
+function exportRangeCSV() {
+  const d = lastData || {};
+  const t = totalsFromPayload(d);
+  const rangeKey = window.__suprbar_range || currentRange || 'range';
+  const date = new Date().toISOString().slice(0, 10);
+  const summary = [
+    'range', rangeKey,
+    'cost', (t.cost || 0).toFixed(4),
+    'messages', t.messages || 0,
+    'input', t.input || 0,
+    'output', t.output || 0,
+    'cache_5m', t.cache_5m || 0,
+    'cache_1h', t.cache_1h || 0,
+    'cache_read', t.cache_read || 0,
+  ].join(',');
+  const projHeader = 'project,cost,messages,tokens';
+  const projRows = projectRowsFromPayload(d).map(p => [
+    JSON.stringify(p.project || ''),
+    (p.cost || 0).toFixed(4),
+    p.messages || 0,
+    p.tokens || 0,
+  ].join(','));
+  const csv = summary + '\n' + projHeader + '\n' + projRows.join('\n') + '\n';
+  downloadCSV(`suprbar-${rangeKey}-${date}.csv`, csv);
+  toast('range CSV downloaded');
+}
+
+function exportCurrentCSV() {
+  if (window.__suprbar_range && window.__suprbar_range !== 'today') exportRangeCSV();
+  else exportTodayCSV();
+}
+
+async function requestQuit() {
+  try {
+    if (!prefsCache) await loadPrefs();
+  } catch (_) { /* ignore */ }
+  if (prefsCache?.behavior?.confirm_quit && !confirm('Quit supr.bar?')) return;
+  fetch('/api/quit', { method: 'POST' });
+}
+
+async function loadVersion() {
+  try {
+    const r = await fetch('/api/version', { cache: 'no-store' });
+    if (!r.ok) return;
+    appMeta = await r.json();
+    const v = 'v' + (appMeta.version || '?');
+    ['headerVersion', 'aboutVersion'].forEach((id) => {
+      const e = document.getElementById(id);
+      if (e) e.textContent = v;
+    });
+    const dev = document.getElementById('devBadge');
+    if (dev) dev.hidden = !appMeta.dev;
+  } catch (_) { /* ignore */ }
+}
+
+async function loadDiagnostics() {
+  const pre = document.getElementById('diagnosticsText');
+  if (!pre) return;
+  pre.textContent = 'Loading…';
+  try {
+    const [health, diagnostics] = await Promise.all([
+      fetch('/api/health').then(r => r.json()),
+      fetch('/api/diagnostics').then(r => r.json()),
+    ]);
+    const payload = { version: appMeta, health, diagnostics };
+    window.__suprbar_diag = payload;
+    pre.textContent = JSON.stringify(payload, null, 2);
+  } catch (e) {
+    pre.textContent = String(e);
+  }
+}
+
+function maybeOpenSettingsFromNav() {
+  if (location.hash === '#settings') openSettings();
+  const pending = window.pywebview?.api?.consume_pending_open?.();
+  if (pending === 'settings') openSettings();
 }
 
 // ───────────────────────── Click cost to copy (#8) ─────────────────────────
 
 $('costNum')?.addEventListener('click', async () => {
-  const today = (lastData && lastData.today) || {};
-  const v = Number(today.cost || 0);
+  const t = totalsFromPayload(lastData || {});
+  const v = Number(t.cost || (lastData?.today?.cost) || 0);
   const txt = '$' + v.toFixed(2);
   try {
     if (navigator.clipboard?.writeText) {
@@ -885,7 +1034,9 @@ function openCtxMenu(x, y) {
     { label: 'Settings',       fn: openSettings },
     { label: 'Refresh',        fn: () => { triggerRefresh(); } },
     { label: pinned ? 'Unpin' : 'Pin', fn: () => $('pinBtn')?.click() },
-    { label: 'Quit',           fn: () => fetch('/api/quit', { method: 'POST' }) },
+    { label: 'Copy summary',   fn: copySummary },
+    { label: 'Export CSV',     fn: exportCurrentCSV },
+    { label: 'Quit',           fn: requestQuit },
   ];
   items.forEach(it => {
     const b = document.createElement('button');
@@ -952,7 +1103,17 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+E → CSV export (#5)
   if (e.ctrlKey && (e.key === 'e' || e.key === 'E')) {
     e.preventDefault();
-    exportTodayCSV();
+    exportCurrentCSV();
+    return;
+  }
+  // Space → refresh (when not typing and not focused on an activatable control,
+  // so Space still clicks the focused button/tab/link as users expect).
+  if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const t = e.target;
+    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    if (t?.closest?.('button, [role="button"], a, summary, [contenteditable]')) return;
+    e.preventDefault();
+    triggerRefresh();
     return;
   }
   // Ctrl+C → copy usage summary, but do not steal copy from fields.
@@ -1018,7 +1179,7 @@ document.addEventListener('keydown', (e) => {
   // Alt+Q quits
   if (e.altKey && (e.key === 'q' || e.key === 'Q')) {
     e.preventDefault();
-    fetch('/api/quit', { method: 'POST' });
+    requestQuit();
     return;
   }
   // Esc — close menu, then settings, then hide
@@ -1048,6 +1209,13 @@ window.addEventListener('blur', () => {
 // ───────────────────────── Polling + visibility (#14) ─────────────────────────
 
 function setPollInterval(ms) {
+  // ms <= 0 means "manual only" — stop auto-polling instead of spinning up a
+  // zero-delay interval (which would hammer /api/today every few ms).
+  if (!ms || ms <= 0) {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    pollInterval = 0;
+    return;
+  }
   if (pollInterval === ms && pollTimer) return;
   pollInterval = ms;
   if (pollTimer) clearInterval(pollTimer);
@@ -1069,8 +1237,58 @@ window.addEventListener('focus', () => load({ refresh: true }));
 document.body.classList.add('loading');                // matches CSS skeleton, removed after #20
 load({ refresh: true });
 loadConfig();
+loadVersion();
+loadPrefs();
 setPollInterval(POLL_MS_ACTIVE);
 setInterval(updateStartedDisplay, 1000);
+window.addEventListener('hashchange', () => {
+  if (location.hash === '#settings') openSettings();
+});
+setTimeout(maybeOpenSettingsFromNav, 120);
+
+document.getElementById('liveSessionList')?.addEventListener('click', (e) => {
+  const row = e.target.closest('.live-row[data-path]');
+  if (!row?.dataset.path) return;
+  openPath(row.dataset.path);
+  toast('opening session…', 'ok', 1200);
+});
+
+document.getElementById('connRetryBtn')?.addEventListener('click', () => {
+  setConnBanner(false);
+  load({ refresh: true });
+});
+document.getElementById('helpBtn')?.addEventListener('click', toggleShortcutsHelp);
+document.getElementById('exportBtn')?.addEventListener('click', exportCurrentCSV);
+document.getElementById('copyPathBtn')?.addEventListener('click', async () => {
+  const path = lastData?.scan_source || '~/.claude/projects';
+  try {
+    await navigator.clipboard.writeText(path);
+    toast('path copied', 'ok', 1400);
+  } catch (_) {
+    toast(path, 'ok', 3200);
+  }
+});
+document.getElementById('copyDiagBtn')?.addEventListener('click', async () => {
+  const text = document.getElementById('diagnosticsText')?.textContent || '';
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('diagnostics copied', 'ok');
+  } catch (_) {
+    toast('copy failed', 'err');
+  }
+});
+document.getElementById('openLogBtn')?.addEventListener('click', async () => {
+  try {
+    const d = await fetch('/api/diagnostics').then(r => r.json());
+    if (d.log_file) openPath(d.log_file);
+    else toast('log path unknown', 'warn');
+  } catch (_) {
+    toast('could not open log', 'err');
+  }
+});
+document.getElementById('settings-sec-diagnostics')?.addEventListener('toggle', (e) => {
+  if (e.target.open) loadDiagnostics();
+});
 
 // Expose a tiny debug surface — useful in DevTools.
 window.suprbar = { load, loadConfig, toast, exportTodayCSV };
@@ -1090,34 +1308,39 @@ const SECTION_TITLES = {
   behavior: 'Behavior',
   projects: 'Projects',
   sources:  'Sources',
-  keyboard: 'Keyboard',
   data:     'Data & privacy',
   window:   'Window',
-  ui:       'Legacy UI',
+  ui:       'Tray & startup',
 };
 
-const SECTION_ORDER = ['range','display','budgets','behavior','projects',
-                       'sources','keyboard','data','window'];
+const SECTION_ORDER = ['display','budgets','behavior','ui','range','projects',
+                       'sources','window','data'];
+
+const SECTION_DEFAULT_OPEN = new Set(['display', 'budgets', 'behavior', 'ui']);
+
+const QUICK_PREFS = [
+  { path: 'ui.pinned', label: 'Pin flyout' },
+  { path: 'ui.start_on_login', label: 'Start on login' },
+  { path: 'display.theme', label: 'Theme', cycle: ['dark', 'light', 'auto'] },
+  { path: 'behavior.refresh_seconds', label: 'Poll', cycle: [0, 5, 10, 30, 60] },
+  { path: 'sources.anthropic_api.enabled', label: 'API source' },
+  { path: 'behavior.confirm_quit', label: 'Confirm quit' },
+];
 
 const LABELS = {
   // range
   'range.default':          { label: 'Default range',         desc: 'Time range applied when popup opens.' },
-  'range.custom_start':     { label: 'Custom start date',     desc: 'Used when range is "custom".' },
-  'range.custom_end':       { label: 'Custom end date',       desc: 'Used when range is "custom".' },
   'range.week_starts_on':   { label: 'Week starts on',        desc: 'Affects the "Wk" range tab.' },
   'range.day_boundary':     { label: 'Day boundary',          desc: 'Compute "today" by local time or UTC.' },
   'range.rolling_24h':      { label: 'Rolling 24h "today"',   desc: 'Use last 24 hours instead of calendar day.' },
   'range.include_weekends': { label: 'Include weekends',      desc: 'Uncheck to exclude Sat/Sun from totals.' },
-  'range.compare_previous': { label: 'Compare to previous',   desc: 'Show delta vs prior period (planned).' },
   // display
   'display.theme':          { label: 'Theme',                 desc: 'Dark, light, or follow OS.' },
   'display.accent':         { label: 'Accent color',          desc: 'Tints highlights and pin.' },
   'display.density':        { label: 'Density',               desc: 'Compact, normal, or spacious padding.' },
   'display.font_scale':     { label: 'Font scale',            desc: '0.85× to 1.25× the base size.' },
-  'display.currency':       { label: 'Currency symbol',       desc: 'Cosmetic — does not convert (USD only).' },
   'display.cost_format':    { label: 'Cost format',           desc: 'Show cents or round to whole dollars.' },
   'display.token_format':   { label: 'Token format',          desc: '"1.2k" compact or "1,234" full.' },
-  'display.locale':         { label: 'Number locale',         desc: 'BCP-47 tag (e.g. en-US, de-DE).' },
   'display.show_token_bar':     { label: 'Show token mix bar',     desc: 'Input / output / cache ratio bar.' },
   'display.show_cache_info':    { label: 'Show cache info',        desc: 'Cache-hit % + cache token count.' },
   'display.show_burn_rate':     { label: 'Show burn rate',         desc: 'Live $/hour for the active session.' },
@@ -1130,57 +1353,29 @@ const LABELS = {
   'budgets.weekly_limit':   { label: 'Weekly limit ($)',      desc: 'Per-week cap. 0 = no limit.' },
   'budgets.monthly_limit':  { label: 'Monthly limit ($)',     desc: 'Per-month cap. 0 = no limit.' },
   'budgets.alert_at_pct':   { label: 'Alert threshold (%)',   desc: 'Warn when % of any limit is reached.' },
-  'budgets.notify':         { label: 'Toast on warning',      desc: 'Show in-popup notification.' },
-  'budgets.tray_warn_color': { label: 'Tint tray icon',       desc: 'Tray icon turns red when over budget.' },
-  'budgets.audio_alert':    { label: 'Audio alert',           desc: 'System sound on budget exceeded.' },
-  'budgets.quiet_hours':    { label: 'Quiet hours',           desc: 'Suppress alerts during a time window.' },
-  'budgets.quiet_start':    { label: 'Quiet start hour',      desc: '0-23, used when quiet_hours = custom.' },
-  'budgets.quiet_end':      { label: 'Quiet end hour',        desc: '0-23, used when quiet_hours = custom.' },
+  'budgets.notify':         { label: 'Toast on warning',      desc: 'Pop a toast when a budget crosses its threshold.' },
+  'budgets.tray_warn_color': { label: 'Tint tray icon',       desc: 'Tray icon turns amber/red when over budget.' },
   // behavior
   'behavior.refresh_seconds':      { label: 'Refresh interval',      desc: 'Seconds between auto-refreshes. 0 = manual only.' },
   'behavior.auto_hide':            { label: 'Auto-hide on blur',     desc: 'Hide popup when focus moves away.' },
   'behavior.auto_hide_delay_ms':   { label: 'Auto-hide delay (ms)',  desc: 'Grace period before hiding.' },
   'behavior.always_on_top':        { label: 'Always on top',         desc: 'Popup stays above other windows.' },
-  'behavior.show_in_taskbar':      { label: 'Show in taskbar',       desc: 'Add a taskbar entry while open.' },
   'behavior.live_threshold_seconds': { label: 'Live session window', desc: 'Sessions touched in last N seconds are "live".' },
-  'behavior.start_minimized':      { label: 'Start minimized',       desc: 'Boot to tray-only (no popup).' },
   'behavior.confirm_quit':         { label: 'Confirm before quit',   desc: 'Prompt before Alt+Q closes the app.' },
   'behavior.click_through':        { label: 'Click-through mode',    desc: 'Popup ignores mouse clicks (header still draggable).' },
-  'behavior.single_instance':      { label: 'Single instance',       desc: 'Prevent multiple suprbar processes.' },
-  'behavior.open_dashboard_on_click': { label: 'Left-click opens',   desc: 'Tray left-click toggles popup.' },
   // projects
   'projects.allowlist':     { label: 'Allowlist',             desc: 'Comma-separated. If non-empty, only these are shown.' },
   'projects.denylist':      { label: 'Denylist',              desc: 'Always hidden. Useful for personal/secret repos.' },
   'projects.anonymize':     { label: 'Anonymize names',       desc: 'Replace with "project-1/2/3" in UI.' },
   'projects.top_n':         { label: 'Top N',                 desc: 'Number of projects in the "Top projects" list.' },
-  // keyboard
-  'keyboard.enable_global':    { label: 'Global hotkeys',     desc: 'OS-wide shortcuts (planned).' },
-  'keyboard.hotkey_toggle':    { label: 'Show / hide hotkey', desc: 'e.g. Ctrl+Alt+S.' },
-  'keyboard.hotkey_refresh':   { label: 'Refresh hotkey',     desc: 'In-popup refresh key.' },
-  'keyboard.hotkey_settings':  { label: 'Settings hotkey',    desc: 'Opens this panel.' },
-  'keyboard.hotkey_quit':      { label: 'Quit hotkey',        desc: 'Closes the app.' },
-  'keyboard.hotkey_export':    { label: 'Export CSV hotkey',  desc: 'Saves today as CSV.' },
-  'keyboard.hotkey_copy_cost': { label: 'Copy cost hotkey',   desc: 'Copies "$X.XX" to clipboard.' },
-  'keyboard.vim_keys':         { label: 'Vim-style navigation', desc: 'j / k navigation in lists.' },
   // data
   'data.log_level':          { label: 'Log level',            desc: 'Verbosity of suprbar.log.' },
-  'data.log_retention_days': { label: 'Log retention (days)', desc: 'How long to keep log files.' },
-  'data.anonymize_logs':     { label: 'Anonymize project names in logs', desc: 'Replace project paths with hashes.' },
-  'data.cache_ttl_seconds':  { label: 'API cache TTL (s)',    desc: 'How long /api/today caches between requests.' },
-  'data.telemetry':          { label: 'Anonymous telemetry',  desc: 'Currently a no-op. Reserved.' },
   // window
-  'window.anchor':            { label: 'Default anchor',      desc: 'Corner the popup snaps to on first launch.' },
-  'window.margin_px':         { label: 'Edge margin (px)',    desc: 'Gap between popup and screen edge.' },
-  'window.preferred_monitor': { label: 'Preferred monitor',   desc: '0 = monitor with cursor.' },
-  'window.remember_position': { label: 'Remember position',   desc: 'Save where you drag it.' },
   'window.width':             { label: 'Width (px)',          desc: 'Popup width.' },
   'window.height':            { label: 'Height (px)',         desc: 'Popup height.' },
-  'window.opacity':           { label: 'Opacity',             desc: 'Window transparency (0.5–1.0).' },
   // sources
   'sources.local.enabled':              { label: 'Local source',            desc: 'Reads ~/.claude/projects/**/*.jsonl.' },
   'sources.anthropic_api.enabled':      { label: 'Anthropic API source',    desc: 'Org-wide spend via Admin API. Requires key above.' },
-  'sources.anthropic_api.poll_seconds': { label: 'Admin API poll (s)',      desc: 'How often to query the Admin API.' },
-  'sources.cost_mode':                  { label: 'Cost mode',                desc: 'equivalent = JSONL-derived, actual_api = API only, both = sum.' },
   // ui
   'ui.pinned':         { label: 'Pinned',           desc: 'Popup does not auto-hide.' },
   'ui.start_on_login': { label: 'Start on Windows sign-in', desc: 'Auto-launch when you log in.' },
@@ -1303,14 +1498,19 @@ function renderRangeData(d) {
   const lbl = document.getElementById('costLabel');
   if (lbl) lbl.textContent = (d.range?.label ? d.range.label[0].toUpperCase() + d.range.label.slice(1) : currentRange) + ' · Claude Code';
 
-  // hide live indicator, hide active metric row, show summary metrics in its place
-  document.getElementById('liveSessions')?.setAttribute('hidden', '');
-  const cards = document.getElementById('sourceCards');
-  if (cards) { cards.hidden = true; cards.innerHTML = ''; }
+  const todaySnap = _rangeCache.get('today');
+  if (todaySnap?.live_sessions?.length) {
+    renderLiveSessions(todaySnap);
+  } else {
+    document.getElementById('liveSessions')?.setAttribute('hidden', '');
+  }
+  renderSourceCards(window.__suprbar_last_sources || todaySnap?.sources || []);
   renderImpactStrip(d);
   renderHourlySparkline(d.hourly);
+  renderStatusStrip(d);
+  updateProjectsTitle(d);
   const live = document.getElementById('liveIndicator');
-  if (live) { live.hidden = false; live.classList.add('dim'); live.textContent = `${t.sessions} sess · ${t.projects} proj`; }
+  if (live) { live.hidden = false; live.classList.add('dim'); live.textContent = `${t.sessions ?? 0} sess · ${t.projects ?? 0} proj`; }
 
   const metricRow = document.getElementById('metricRow');
   if (metricRow) {
@@ -1319,6 +1519,7 @@ function renderRangeData(d) {
     set('mMessages', (t.messages || 0).toLocaleString());
     set('mModel', d.by_model?.[0]?.model ? d.by_model[0].model.replace(/^claude-/, '') : '—');
     set('mStarted', (d.range?.days || 1) + 'd');
+    set('mSessions', String(t.sessions ?? d.insights?.sessions_today ?? '—'));
     const burn = document.getElementById('mBurn');
     if (burn) burn.textContent = '—';
   }
@@ -1378,6 +1579,29 @@ function renderBudget(b) {
   else if (active.alerting) fill.classList.add('warn');
   pct.textContent = active.pct >= 1000 ? '>999%' : active.pct.toFixed(0) + '%';
   pct.title = `${active.key}: $${active.spent.toFixed(2)} / $${active.limit.toFixed(2)}`;
+  const remain = document.getElementById('bsRemain');
+  if (remain) {
+    const left = Math.max(0, active.limit - active.spent);
+    remain.textContent = left > 0 ? `${fmtMoney(left)} left` : 'over';
+  }
+  maybeNotifyBudget(active);
+}
+
+// Toast once when a budget first crosses its alert threshold or limit, if the
+// user enabled budgets.notify. Tracks last-notified state per window so we
+// don't re-toast every 30s poll.
+let _budgetNotified = {};
+function maybeNotifyBudget(active) {
+  if (!active || !prefsCache?.budgets?.notify) return;
+  const state = active.pct >= 100 ? 'over' : active.alerting ? 'warn' : 'ok';
+  if (state !== 'ok' && _budgetNotified[active.key] !== state) {
+    if (state === 'over') {
+      toast(`Over ${active.key} budget — $${active.spent.toFixed(2)} / $${active.limit.toFixed(2)}`, 'err', 4000);
+    } else {
+      toast(`${Math.round(active.pct)}% of ${active.key} budget used`, 'warn', 3600);
+    }
+  }
+  _budgetNotified[active.key] = state;
 }
 
 setInterval(loadBudgets, 30_000);
@@ -1385,9 +1609,16 @@ loadBudgets();
 
 // ──── Apply display prefs to the DOM ────
 
+function repaintCurrent() {
+  if (!lastData) return;
+  if (window.__suprbar_range && window.__suprbar_range !== 'today') renderRangeData(lastData);
+  else render(lastData);
+}
+
 function applyDisplayPrefs(prefs) {
   if (!prefs) return;
   const d = prefs.display || {};
+  displayPrefs = d;
   const b = prefs.behavior || {};
   const body = document.body;
 
@@ -1412,6 +1643,8 @@ function applyDisplayPrefs(prefs) {
   setHidden('.token-bar, .token-legend', d.show_token_bar === false);
   setHidden('#cacheHit', d.show_cache_info === false);
   setHidden('#mBurnCell, #mBurn', d.show_burn_rate === false);
+  setHidden('#mModelCell', d.show_model === false);
+  setHidden('#mSessionsCell', d.show_sessions_today === false);
 
   // refresh interval
   const refresh = Math.max(0, Number(b.refresh_seconds ?? 5));
@@ -1446,32 +1679,60 @@ function getNested(obj, path) {
   return cur;
 }
 
+function prefsCommit(path, val, { silent = false } = {}) {
+  return fetch('/api/prefs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates: { [path]: val } }),
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      if (typeof toast === 'function') toast(d.error.message || 'invalid', 'err');
+      return null;
+    }
+    prefsCache = d.prefs;
+    applyDisplayPrefs(prefsCache);
+    if (path === 'ui.pinned') syncPinButton(!!val);
+    if (path.startsWith('range.') || path.startsWith('projects.')) {
+      load({ refresh: true });
+      loadBudgets();
+    }
+    if (path.startsWith('budgets.')) loadBudgets();
+    if (path.startsWith('display.')) { renderSettingsQuick(); repaintCurrent(); }
+    if (!silent && typeof toast === 'function') toast('saved', 'ok', 900);
+    return d;
+  });
+}
+
+function resetSettingsSection(section, items) {
+  if (!items?.length) return;
+  if (!confirm(`Reset all "${SECTION_TITLES[section] || section}" settings to defaults?`)) return;
+  const updates = {};
+  for (const s of items) updates[s.path] = s.default;
+  fetch('/api/prefs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      toast(d.error.message || 'reset failed', 'err');
+      return;
+    }
+    prefsCache = d.prefs;
+    applyDisplayPrefs(prefsCache);
+    renderSettingsQuick();
+    renderSettings();
+    load({ refresh: true });
+    loadBudgets();
+    toast('section reset', 'ok');
+  });
+}
+
 function buildControl(setting, value) {
   const ctl = document.createElement('div');
   ctl.className = 'ctl-wrap';
   const path = setting.path;
 
-  const commit = (val) => {
-    fetch('/api/prefs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates: { [path]: val } }),
-    }).then(r => r.json()).then(d => {
-      if (d.error) {
-        if (typeof toast === 'function') toast(d.error.message || 'invalid', 'err');
-        return;
-      }
-      prefsCache = d.prefs;
-      applyDisplayPrefs(prefsCache);
-      // refresh data when range or filter prefs change
-      if (path.startsWith('range.') || path.startsWith('projects.')) {
-        load({ refresh: true });
-        loadBudgets();
-      }
-      if (path.startsWith('budgets.')) loadBudgets();
-      if (typeof toast === 'function') toast('saved', 'ok', 900);
-    });
-  };
+  const commit = (val) => prefsCommit(path, val);
 
   if (setting.type === 'bool') {
     const btn = document.createElement('button');
@@ -1520,10 +1781,11 @@ function buildControl(setting, value) {
     }
   } else if (setting.type === 'int' || setting.type === 'float') {
     const lo = setting.min, hi = setting.max;
-    const useRange = setting.type === 'float'
-      || (lo != null && hi != null && (hi - lo) <= 100);
+    const isMoney = /^budgets\.(daily|weekly|monthly)_limit$/.test(path);
+    const useRange = !isMoney && (setting.type === 'float'
+      || (lo != null && hi != null && (hi - lo) <= 100));
     const input = document.createElement('input');
-    input.className = 'input-fld';
+    input.className = 'input-fld' + (isMoney ? ' money' : '');
     if (useRange && lo != null && hi != null) {
       input.type = 'range';
       input.min = lo; input.max = hi;
@@ -1532,6 +1794,7 @@ function buildControl(setting, value) {
       input.type = 'number';
       if (lo != null) input.min = lo;
       if (hi != null) input.max = hi;
+      if (isMoney) input.step = '0.01';
     }
     input.value = (value == null) ? '' : String(value);
     const label = document.createElement('span');
@@ -1604,73 +1867,227 @@ function buildControl(setting, value) {
   return ctl;
 }
 
-function renderSettings() {
-  const host = document.getElementById('settingsSections');
-  if (!host) return;
-  host.innerHTML = '';
-
-  // group schema entries by section
+function settingsBySection() {
   const bySection = {};
-  for (const s of schemaCache) {
+  for (const s of schemaCache || []) {
     const section = s.path.split('.')[0];
     (bySection[section] ||= []).push(s);
   }
+  return bySection;
+}
+
+function renderSettingsQuick() {
+  const host = document.getElementById('settingsQuick');
+  if (!host || !prefsCache) return;
+  host.innerHTML = '';
+  for (const q of QUICK_PREFS) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'rt';
+    const cur = getNested(prefsCache, q.path);
+    let label = q.label;
+    if (q.cycle) {
+      if (q.path === 'behavior.refresh_seconds') {
+        label = cur === 0 ? 'Manual refresh' : `Every ${cur}s`;
+      } else if (q.path === 'display.theme') {
+        label = `Theme: ${cur}`;
+      } else {
+        label = `${q.label}: ${cur}`;
+      }
+      chip.classList.add('active');
+    } else if (!!cur) {
+      chip.classList.add('active');
+    }
+    chip.textContent = label;
+    chip.title = q.path;
+    chip.addEventListener('click', () => {
+      if (q.cycle) {
+        const now = getNested(prefsCache, q.path);
+        let idx = q.cycle.indexOf(now);
+        if (idx < 0) idx = 0;
+        const val = q.cycle[(idx + 1) % q.cycle.length];
+        prefsCommit(q.path, val).then(() => renderSettingsQuick());
+      } else {
+        const next = !getNested(prefsCache, q.path);
+        prefsCommit(q.path, next).then(() => renderSettingsQuick());
+      }
+    });
+    host.appendChild(chip);
+  }
+}
+
+function renderSettingsNav() {
+  const nav = document.getElementById('settingsNav');
+  if (!nav) return;
+  const bySection = settingsBySection();
+  nav.innerHTML = '';
+  const jump = (id) => {
+    const el = document.getElementById('settings-sec-' + id);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    nav.querySelectorAll('.rt').forEach(p => p.classList.toggle('active', p.dataset.section === id));
+  };
+  const addPill = (id, label, count) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rt';
+    b.dataset.section = id;
+    b.textContent = count != null ? `${label} · ${count}` : label;
+    b.addEventListener('click', () => jump(id));
+    nav.appendChild(b);
+  };
+  addPill('key', 'API key', null);
+  for (const section of SECTION_ORDER) {
+    const n = bySection[section]?.length;
+    if (!n) continue;
+    addPill(section, SECTION_TITLES[section] || section, n);
+  }
+  addPill('diagnostics', 'Diagnostics', null);
+  addPill('about', 'About', null);
+}
+
+function renderSettings() {
+  const host = document.getElementById('settingsSections');
+  if (!host || !schemaCache?.length) return;
+  host.innerHTML = '';
+  const bySection = settingsBySection();
 
   for (const section of SECTION_ORDER) {
     const items = bySection[section];
-    if (!items || items.length === 0) continue;
-    const sec = document.createElement('div');
-    sec.className = 'settings-section';
-    sec.dataset.section = section;
+    if (!items?.length) continue;
 
-    const title = document.createElement('div');
-    title.className = 'settings-section-title';
+    const det = document.createElement('details');
+    det.className = 'settings-section-collapse';
+    det.id = 'settings-sec-' + section;
+    det.open = SECTION_DEFAULT_OPEN.has(section);
+    det.dataset.section = section;
+
+    const sum = document.createElement('summary');
+    sum.className = 'settings-section-summary';
+    const title = document.createElement('span');
+    title.className = 'sec-title';
     title.textContent = SECTION_TITLES[section] || section;
-    sec.appendChild(title);
+    const meta = document.createElement('span');
+    meta.className = 'sec-meta';
+    const count = document.createElement('span');
+    count.className = 'sec-count';
+    count.textContent = String(items.length);
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'btn-xs section-reset';
+    resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resetSettingsSection(section, items);
+    });
+    meta.append(count, resetBtn);
+    sum.append(title, meta);
+    det.appendChild(sum);
+
+    if (section === 'budgets') {
+      const card = document.createElement('div');
+      card.className = 'budget-quick-card impact-strip';
+      card.innerHTML = '<div class="budget-quick-title">Limits ($0 = off)</div><div class="budget-quick-grid" id="budgetQuickGrid"></div>';
+      det.appendChild(card);
+      const grid = card.querySelector('#budgetQuickGrid');
+      for (const key of ['daily', 'weekly', 'monthly']) {
+        const path = `budgets.${key}_limit`;
+        const setting = items.find(s => s.path === path);
+        if (!setting || !grid) continue;
+        const wrap = document.createElement('label');
+        wrap.className = 'budget-quick-field';
+        wrap.innerHTML = `<span>${key}</span>`;
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.min = '0';
+        inp.step = '0.01';
+        inp.className = 'input-fld money';
+        inp.value = String(getNested(prefsCache, path) ?? 0);
+        inp.addEventListener('change', () => {
+          prefsCommit(path, parseFloat(inp.value) || 0);
+        });
+        wrap.appendChild(inp);
+        grid.appendChild(wrap);
+      }
+    }
+
+    const body = document.createElement('div');
+    body.className = 'settings-section-body';
 
     for (const setting of items) {
+      if (section === 'budgets' && /^budgets\.(daily|weekly|monthly)_limit$/.test(setting.path)) {
+        continue;
+      }
       const row = document.createElement('div');
       row.className = 'settings-row dense';
       row.dataset.path = setting.path;
       const main = document.createElement('div');
       main.className = 'settings-row-main';
       const meta = LABELS[setting.path] || { label: setting.path, desc: '' };
-      main.innerHTML = `<div class="lbl">${escape(meta.label)}</div><div class="desc">${meta.desc || ''}</div>`;
-      row.appendChild(main);
-
       const cur = getNested(prefsCache, setting.path);
+      const changed = JSON.stringify(cur) !== JSON.stringify(setting.default);
+      main.innerHTML = `<div class="lbl">${escape(meta.label)}${changed ? '<span class="changed-dot" title="Changed from default">●</span>' : ''}</div><div class="desc">${escape(meta.desc || '')}</div>`;
+      row.appendChild(main);
       row.appendChild(buildControl(setting, cur ?? setting.default));
-      sec.appendChild(row);
+      body.appendChild(row);
     }
-    host.appendChild(sec);
+    det.appendChild(body);
+    host.appendChild(det);
   }
 }
 
-// search filter for settings
-document.getElementById('settingsSearch')?.addEventListener('input', (e) => {
-  const q = e.target.value.trim().toLowerCase();
-  document.querySelectorAll('.settings-section[data-section]').forEach(sec => {
+function applySettingsSearch(q) {
+  const query = (q || '').trim().toLowerCase();
+  let visibleRows = 0;
+  let totalRows = 0;
+  document.querySelectorAll('.settings-section-collapse[data-section]').forEach(sec => {
     const rows = sec.querySelectorAll('.settings-row[data-path]');
     let any = false;
     rows.forEach(row => {
+      totalRows++;
       const path = row.dataset.path.toLowerCase();
       const lbl = row.querySelector('.lbl')?.textContent.toLowerCase() || '';
       const desc = row.querySelector('.desc')?.textContent.toLowerCase() || '';
-      const match = !q || path.includes(q) || lbl.includes(q) || desc.includes(q);
+      const match = !query || path.includes(query) || lbl.includes(query) || desc.includes(query);
       row.classList.toggle('filtered', !match);
-      if (match) any = true;
+      if (match) { any = true; visibleRows++; }
     });
-    sec.classList.toggle('empty-section', !any);
+    sec.classList.toggle('empty-section', rows.length > 0 && !any);
+    if (query && any) sec.open = true;
   });
+  const keySec = document.getElementById('settings-sec-key');
+  if (keySec) {
+    const lbl = keySec.textContent.toLowerCase();
+    const match = !query || lbl.includes(query);
+    keySec.classList.toggle('empty-section', !match);
+    if (query && match) keySec.open = true;
+  }
+  const empty = document.getElementById('settingsEmpty');
+  const dynamic = document.getElementById('settingsSections');
+  if (empty && dynamic) {
+    const showEmpty = query && visibleRows === 0;
+    empty.hidden = !showEmpty;
+    dynamic.hidden = showEmpty;
+  }
+  const search = document.getElementById('settingsSearch');
+  if (search && query) {
+    search.dataset.hint = `${visibleRows} of ${totalRows}`;
+  } else if (search) {
+    delete search.dataset.hint;
+  }
+}
+
+document.getElementById('settingsSearch')?.addEventListener('input', (e) => {
+  applySettingsSearch(e.target.value);
+});
+document.getElementById('settingsClearSearch')?.addEventListener('click', () => {
+  const s = document.getElementById('settingsSearch');
+  if (s) s.value = '';
+  applySettingsSearch('');
+  s?.focus();
 });
 
-// rebind settings open to pull schema + prefs
-const _origOpenSettings = window.openSettings;
-window.openSettings = async function patchedOpenSettings() {
-  if (typeof _origOpenSettings === 'function') _origOpenSettings();
-  await loadPrefs(true);
-  if (schemaCache && schemaCache.length) renderSettings();
-};
+window.openSettings = openSettings;
 
 // Reset / Export / Import buttons
 document.getElementById('resetConfigBtn')?.addEventListener('click', async () => {
@@ -1727,12 +2144,8 @@ document.getElementById('importFileInput')?.addEventListener('change', async (e)
   e.target.value = '';
 });
 
-// Boot prefs apply ASAP (before settings panel opens) so theme/density takes effect
-loadPrefs().then(() => {
-  if (document.getElementById('settingsOverlay') && !document.getElementById('settingsOverlay').hidden) {
-    renderSettings();
-  }
-});
+// Boot prefs apply ASAP so theme/density takes effect on first paint
+loadPrefs().catch(() => {});
 
 window.suprbar.setRange = setRange;
 window.suprbar.loadPrefs = loadPrefs;

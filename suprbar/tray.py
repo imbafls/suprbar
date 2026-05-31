@@ -31,15 +31,15 @@ PULSE_MS = 300
 # ---------- Icon drawing ----------
 
 def _gradient_image(size: int, palette: str = "default") -> Image.Image:
-    """Diagonal gradient. Palette accents vary: default = accent→violet,
-    warn = orange, danger = red."""
+    """Diagonal gradient. Palette accents vary: default = terracotta (matches
+    the flyout accent), warn = amber, danger = red."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     if palette == "warn":
         a, v = (251, 191, 36), (245, 158, 11)    # amber → orange
     elif palette == "danger":
         a, v = (248, 113, 113), (220, 38, 38)    # red gradient
     else:
-        a, v = (91, 141, 239), (140, 91, 239)    # accent → violet
+        a, v = (217, 119, 87), (196, 104, 74)    # terracotta (--b-accent → --b-violet)
     px = img.load()
     denom = 2 * (size - 1) if size > 1 else 1
     for y in range(size):
@@ -429,12 +429,8 @@ class TrayApp:
         while not self._stop.is_set():
             if self._stop.wait(REFRESH_SECONDS):
                 return
-            # Detect newly-enabled / disabled sources and bust the cache so the
-            # next poll reflects the change immediately.
-            if self._check_source_changed():
-                server.invalidate_today_cache()
-            else:
-                server.invalidate_today_cache()
+            # Bust the server-side cache so the next tooltip reflects fresh data.
+            server.invalidate_today_cache()
             self._update_tooltip()
 
     # ---- run ----

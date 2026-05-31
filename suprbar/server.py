@@ -3,25 +3,23 @@
 Routes:
   GET  /                            static index.html
   GET  /app.js, /styles.css         static
-  GET  /api/ping                    liveness
+  GET  /api/ping                    liveness (used for single-instance check)
   GET  /api/today[?refresh=1]       aggregated today summary (all sources)
+  GET  /api/range?key=…             usage for a time-range tab
+  GET  /api/budgets                 spent-vs-limit for day/week/month
   GET  /api/config                  current config (key fingerprint only)
   POST /api/config                  update config (JSON body)
   POST /api/config/test-key         test admin key (JSON body: {"key": "..."})
-  POST /api/open-path               open a path under ~ in OS default app
-  POST /api/quit                    request app shutdown
-
-  GET  /api/version                 app version + build date
-  GET  /api/health                  liveness + last scan + uptime
-  GET  /api/diagnostics             python/platform/cache/log/uptime/pid/port
-  GET  /api/projects                today's cost/tokens per project
-  GET  /api/sources                 enumerate per-source summaries
-  GET  /api/sources/{id}            filter to one source
   GET  /api/config/export           full public config snapshot
   POST /api/config/import           replace config (rejects plaintext keys)
   POST /api/config/reset            reset to defaults
-  GET  /api/window-state            popup geometry
-  POST /api/window-state            update popup geometry
+  GET  /api/prefs, /api/prefs/schema  full preference tree + schema
+  POST /api/prefs                   update preferences (dotted paths)
+  POST /api/open-path               open a path under ~ in OS default app
+  POST /api/quit                    request app shutdown
+  GET  /api/version                 app version + build date
+  GET  /api/health                  liveness + last scan + uptime
+  GET  /api/diagnostics             python/platform/cache/log/source health
 """
 
 from __future__ import annotations
@@ -43,6 +41,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, aggregator, config, scanner
 from .providers import anthropic_api as p_anthropic_api
+from .providers import local as p_local
 
 log = logging.getLogger("suprbar.server")
 
@@ -109,8 +108,8 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
     proj = cfg.get("projects", {}) or {}
     fp = (
         key,
-        custom_start or rng.get("custom_start") or "",
-        custom_end or rng.get("custom_end") or "",
+        custom_start or "",
+        custom_end or "",
         rng.get("week_starts_on", "mon"),
         rng.get("day_boundary", "local"),
         bool(rng.get("rolling_24h", False)),
@@ -126,8 +125,8 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
         return entry["data"]
     data = scanner.range_summary(
         range_key=key,
-        custom_start=custom_start or rng.get("custom_start"),
-        custom_end=custom_end   or rng.get("custom_end"),
+        custom_start=custom_start,
+        custom_end=custom_end,
         week_starts_on=rng.get("week_starts_on", "mon"),
         day_boundary=rng.get("day_boundary", "local"),
         rolling_24h=bool(rng.get("rolling_24h", False)),
@@ -161,10 +160,11 @@ def _trigger_quit() -> None:
 # ---------- response helpers ----------
 
 def _csp_header() -> str:
+    # Fully local/offline: no remote fonts or scripts. Everything is same-origin.
     return (
         "default-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src https://fonts.gstatic.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
         "img-src 'self' data:; "
         "connect-src 'self';"
     )
@@ -286,29 +286,11 @@ class Handler(BaseHTTPRequestHandler):
                 extra_headers={"ETag": etag},
             )
 
-        if path == "/api/projects":
-            return self._send_json(200, _projects_payload())
-
-        if path == "/api/sources":
-            return self._send_json(200, _sources_payload())
-
-        if path.startswith("/api/sources/"):
-            sid = path[len("/api/sources/"):].strip("/")
-            if not sid:
-                return self._send_error(400, "missing_id", "source id required")
-            payload = _source_by_id(sid)
-            if payload is None:
-                return self._send_error(404, "unknown_source", f"no source '{sid}'")
-            return self._send_json(200, payload)
-
         if path == "/api/config":
             return self._send_json(200, _public_config())
 
         if path == "/api/config/export":
             return self._send_json(200, _export_config())
-
-        if path == "/api/window-state":
-            return self._send_json(200, config.load_window_state())
 
         if path == "/api/range":
             try:
@@ -383,16 +365,13 @@ class Handler(BaseHTTPRequestHandler):
                 applied = config.set_many(updates)
             except ValueError as e:
                 return self._send_error(400, "invalid_value", str(e))
+            if "ui.start_on_login" in applied:
+                v = bool(applied["ui.start_on_login"])
+                bat = str(Path(__file__).resolve().parent.parent / "run.bat")
+                config.apply_startup_setting(v, bat if v else None)
             invalidate_today_cache()
             return self._send_json(200, {"applied": applied,
                                           "prefs": _prefs_payload()["prefs"]})
-
-        if path == "/api/window-state":
-            body = self._read_json_body()
-            if not isinstance(body, dict):
-                return self._send_error(400, "bad_body", "JSON object required")
-            new = config.save_window_state(body)
-            return self._send_json(200, new)
 
         if path == "/api/open-path":
             body = self._read_json_body()
@@ -414,7 +393,13 @@ def _error(code: str, message: str) -> dict:
 
 
 def _version_payload() -> dict:
-    return {"version": __version__, "build_date": _build_date()}
+    import sys
+
+    return {
+        "version": __version__,
+        "build_date": _build_date(),
+        "dev": not getattr(sys, "frozen", False),
+    }
 
 
 def _build_date() -> str | None:
@@ -457,6 +442,14 @@ def _health_payload() -> dict:
     }
 
 
+def _safe_self_test(provider) -> dict:
+    """Call a provider's self_test() defensively for /api/diagnostics."""
+    try:
+        return provider.self_test()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "last_error": f"{type(e).__name__}: {e!s:.120}"}
+
+
 def _diagnostics_payload() -> dict:
     cache_meta = None
     try:
@@ -477,6 +470,10 @@ def _diagnostics_payload() -> dict:
         "config_dir": str(config.config_dir()),
         "config_path": str(config.config_path()),
         "cache_meta": cache_meta,
+        "sources": {
+            "local": _safe_self_test(p_local),
+            "anthropic_api": _safe_self_test(p_anthropic_api),
+        },
         "today_cache": {
             "has_data": _today_cache["data"] is not None,
             "age_seconds": (
@@ -486,41 +483,6 @@ def _diagnostics_payload() -> dict:
             "ttl_seconds": _TODAY_TTL,
         },
     }
-
-
-def _projects_payload() -> dict:
-    try:
-        data = today_cached()
-    except Exception:  # noqa: BLE001
-        return {"projects": []}
-    if not isinstance(data, dict):
-        return {"projects": []}
-    by_project = data.get("by_project")
-    if isinstance(by_project, list):
-        return {"projects": by_project}
-    if isinstance(by_project, dict):
-        return {"projects": [
-            {"id": k, **(v if isinstance(v, dict) else {"value": v})}
-            for k, v in by_project.items()
-        ]}
-    return {"projects": []}
-
-
-def _sources_payload() -> dict:
-    try:
-        data = today_cached()
-    except Exception:  # noqa: BLE001
-        return {"sources": []}
-    if not isinstance(data, dict):
-        return {"sources": []}
-    return {"sources": data.get("sources", []) or []}
-
-
-def _source_by_id(sid: str) -> dict | None:
-    for s in _sources_payload().get("sources", []):
-        if isinstance(s, dict) and s.get("id") == sid:
-            return s
-    return None
 
 
 def _public_config() -> dict:
@@ -627,8 +589,8 @@ def _range_payload(qs: dict) -> dict:
     cfg = config.load()
     rng = cfg.get("range", {})
     key = (qs.get("key") or [rng.get("default", "today")])[0]
-    cs  = (qs.get("start") or [rng.get("custom_start") or ""])[0] or None
-    ce  = (qs.get("end") or [rng.get("custom_end") or ""])[0] or None
+    cs  = (qs.get("start") or [""])[0] or None
+    ce  = (qs.get("end") or [""])[0] or None
     if "refresh" in qs:
         # caller is forcing a refresh; drop cached entry for this fingerprint
         # (range_cached re-computes when entry is missing).
@@ -719,16 +681,6 @@ def _find_free_port(preferred: int = 47821) -> int:
         except OSError:
             continue
     raise RuntimeError("no port available")
-
-
-def try_bind(port: int) -> bool:
-    """Return True if `port` is free on 127.0.0.1."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", port))
-        return True
-    except OSError:
-        return False
 
 
 def start_in_background(

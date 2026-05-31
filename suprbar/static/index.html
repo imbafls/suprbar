@@ -4,9 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>supr.bar</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Fully offline: system font stack (Segoe UI on Windows) — no remote fonts. -->
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="loading">
@@ -17,9 +15,17 @@
         <div class="title">
           <span class="title-mark">S</span>
           supr.bar
-          <span class="ver">v0.6</span>
+          <span class="ver" id="headerVersion">v0.7</span>
+          <span class="dev-badge" id="devBadge" hidden>dev</span>
         </div>
         <div class="head-actions">
+          <button class="icon-btn" id="helpBtn" aria-label="Keyboard shortcuts" data-tip="Shortcuts (?)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </button>
           <button class="icon-btn refresh-btn" id="refreshBtn" aria-label="Refresh data" data-tip="Refresh (F5)">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
@@ -44,15 +50,21 @@
 
       <!-- range tabs -->
       <div class="range-tabs" id="rangeTabs" role="tablist" aria-label="Time range">
-        <button class="rt active" role="tab" data-range="today"     data-tip="Today">Today</button>
-        <button class="rt"        role="tab" data-range="24h"       data-tip="Rolling 24 hours">24h</button>
-        <button class="rt"        role="tab" data-range="7d"        data-tip="Last 7 days">7d</button>
-        <button class="rt"        role="tab" data-range="week"      data-tip="This calendar week">Wk</button>
-        <button class="rt"        role="tab" data-range="month"     data-tip="This calendar month">Mo</button>
-        <button class="rt"        role="tab" data-range="30d"       data-tip="Last 30 days">30d</button>
-        <button class="rt"        role="tab" data-range="90d"       data-tip="Last 90 days">90d</button>
+        <button class="rt active" role="tab" aria-selected="true"  data-range="today"     data-tip="Today">Today</button>
+        <button class="rt"        role="tab" aria-selected="false" data-range="24h"       data-tip="Rolling 24 hours">24h</button>
+        <button class="rt"        role="tab" aria-selected="false" data-range="7d"        data-tip="Last 7 days">7d</button>
+        <button class="rt"        role="tab" aria-selected="false" data-range="week"      data-tip="This calendar week">Wk</button>
+        <button class="rt"        role="tab" aria-selected="false" data-range="month"     data-tip="This calendar month">Mo</button>
+        <button class="rt"        role="tab" aria-selected="false" data-range="30d"       data-tip="Last 30 days">30d</button>
+        <button class="rt"        role="tab" aria-selected="false" data-range="90d"       data-tip="Last 90 days">90d</button>
       </div>
 
+      <div class="conn-banner" id="connBanner" hidden role="status">
+        <span id="connBannerText">Offline — retrying…</span>
+        <button class="btn-sm" type="button" id="connRetryBtn">Retry</button>
+      </div>
+
+      <div class="flyout-body" id="flyoutBody">
       <!-- cost block -->
       <div class="cost-block" id="costBlock">
         <div class="cost-eyebrow">
@@ -67,6 +79,7 @@
             <span class="bs-label">Budget</span>
             <div class="bs-bar"><div class="bs-fill" id="bsFill" style="width:0%"></div></div>
             <span class="bs-pct" id="bsPct">—</span>
+            <span class="bs-remain" id="bsRemain"></span>
           </div>
         </div>
         <div class="cost" id="costNum" aria-live="polite" aria-atomic="true">
@@ -87,7 +100,13 @@
             <span class="impact-label">Saved</span>
             <span class="impact-value" id="iSaved">—</span>
           </div>
+          <div class="impact-chip">
+            <span class="impact-label">Top proj</span>
+            <span class="impact-value" id="iTopProj">—</span>
+          </div>
         </div>
+
+        <div class="status-strip" id="statusStrip" aria-label="Scan status"></div>
 
         <div class="token-bar" aria-hidden="true">
           <div class="tb-input"  id="tbIn"    style="width: 0%"></div>
@@ -110,7 +129,7 @@
           <div class="metric-label">Messages</div>
           <div class="metric-value" id="mMessages">—</div>
         </div>
-        <div class="metric">
+        <div class="metric" id="mModelCell">
           <div class="metric-label">Model</div>
           <div class="metric-value small" id="mModel">—</div>
         </div>
@@ -121,6 +140,10 @@
         <div class="metric" id="mBurnCell">
           <div class="metric-label">Burn</div>
           <div class="metric-value small" id="mBurn">—</div>
+        </div>
+        <div class="metric" id="mSessionsCell">
+          <div class="metric-label">Sessions</div>
+          <div class="metric-value small" id="mSessions">—</div>
         </div>
       </div>
 
@@ -138,7 +161,7 @@
       <!-- top projects mini-list -->
       <details class="projects-list" id="projectsList">
         <summary>
-          <span class="proj-title">Top projects today</span>
+          <span class="proj-title" id="projectsListTitle">Top projects</span>
           <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
@@ -167,21 +190,27 @@
         <div class="t">No sessions running</div>
         <div class="s" id="emptySub">watching ~/.claude</div>
       </div>
+      </div><!-- /.flyout-body -->
 
       <!-- footer -->
       <div class="flyout-foot">
         <span id="footMeta">watching ~/.claude</span>
         <div class="actions">
+          <button class="btn-sm primary" id="exportBtn" data-tip="Export CSV (Ctrl+E)">Export</button>
           <button class="btn-sm" id="copySummaryBtn" data-tip="Copy usage summary (Ctrl+C)">Copy</button>
+          <button class="btn-sm" id="copyPathBtn" data-tip="Copy scan path">Path</button>
           <button class="btn-sm" id="openActiveBtn" data-tip="Open active session file">Active</button>
-          <button class="btn-sm" id="openLogsBtn" data-tip="Open ~/.claude/projects">Logs</button>
+          <button class="btn-sm" id="openLogsBtn" data-tip="Open ~/.claude/projects (Ctrl+L)">Logs</button>
         </div>
       </div>
 
       <!-- settings overlay (hidden by default) -->
       <div class="settings-overlay" id="settingsOverlay" hidden>
         <div class="settings-head">
-          <div class="title">Settings</div>
+          <div class="title">
+            <span class="title-mark">S</span>
+            Settings
+          </div>
           <div class="settings-head-tools">
             <input type="search" id="settingsSearch" class="settings-search" placeholder="Filter settings…" aria-label="Filter settings">
             <button class="icon-btn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
@@ -193,44 +222,82 @@
           </div>
         </div>
 
-        <div class="settings-body">
-          <!-- Static API-key block (the key is stored DPAPI-encrypted; can't go
-               through the generic prefs path). -->
-          <div class="settings-section" data-section="key">
-            <div class="settings-section-title">Anthropic API Key</div>
-            <div class="settings-row">
-              <div class="settings-row-main">
-                <div class="lbl">Admin key</div>
-                <div class="desc">Required for org-wide API spend (<span class="mono">sk-ant-admin01-…</span>). Stored encrypted on this machine.</div>
-                <div class="input-row">
-                  <input type="password" id="adminKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-ant-admin01-…" aria-label="Anthropic admin key">
-                  <button class="btn-sm" id="testKeyBtn">Test</button>
-                  <button class="btn-sm" id="clearKeyBtn">Clear</button>
+        <div class="settings-toolbar">
+          <div class="settings-eyebrow">Quick</div>
+          <div class="range-tabs settings-quick-tabs" id="settingsQuick" role="toolbar" aria-label="Quick settings"></div>
+        </div>
+
+        <nav class="range-tabs settings-nav" id="settingsNav" aria-label="Settings sections"></nav>
+
+        <div class="settings-body" id="settingsBody">
+          <div class="settings-status" id="settingsStatus" hidden role="status"></div>
+
+          <details class="settings-section-collapse" id="settings-sec-key" data-section="key" open>
+            <summary class="settings-section-summary">
+              <span class="sec-title">Anthropic API Key</span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="settings-row settings-row-stack">
+                <div class="settings-row-main">
+                  <div class="lbl">Admin key</div>
+                  <div class="desc">Org-wide API spend (<span class="mono">sk-ant-admin01-…</span>). Encrypted on this machine.</div>
+                  <div class="input-row">
+                    <input type="password" id="adminKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-ant-admin01-…" aria-label="Anthropic admin key">
+                    <button class="btn-sm" id="testKeyBtn">Test</button>
+                    <button class="btn-sm" id="clearKeyBtn">Clear</button>
+                  </div>
+                  <div class="status-line" id="keyStatus" aria-live="polite"></div>
                 </div>
-                <div class="status-line" id="keyStatus" aria-live="polite"></div>
               </div>
             </div>
-          </div>
+          </details>
 
           <!-- Dynamically rendered sections from /api/prefs + /api/prefs/schema -->
-          <div id="settingsSections"></div>
-
-          <!-- Bottom action row -->
-          <div class="settings-actions">
-            <button class="btn-sm" id="exportConfigBtn" data-tip="Download a config snapshot">Export config</button>
-            <button class="btn-sm" id="importConfigBtn" data-tip="Restore from a snapshot">Import</button>
-            <button class="btn-sm danger" id="resetConfigBtn" data-tip="Restore all defaults (keeps API key)">Reset</button>
-            <input type="file" id="importFileInput" accept="application/json" hidden>
+          <div id="settingsSections" class="settings-dynamic"></div>
+          <div class="settings-empty" id="settingsEmpty" hidden>
+            <p>No settings match your search.</p>
+            <button type="button" class="btn-sm" id="settingsClearSearch">Clear search</button>
           </div>
 
-          <div class="settings-section about">
-            <div class="settings-section-title">About</div>
-            <div class="settings-row">
-              <div class="settings-row-main">
-                <div class="lbl">supr.bar <span id="aboutVersion">v0.6</span></div>
-                <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">1–7</span> ranges · <span class="mono">Ctrl+C</span> copy · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> all shortcuts</div>
+          <details class="settings-section-collapse" id="settings-sec-diagnostics">
+            <summary class="settings-section-summary">
+              <span class="sec-title">Diagnostics</span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="settings-row settings-row-stack">
+                <div class="settings-row-main">
+                  <pre class="diag-pre" id="diagnosticsText">Loading…</pre>
+                  <div class="input-row">
+                    <button class="btn-sm" id="copyDiagBtn" type="button">Copy JSON</button>
+                    <button class="btn-sm" id="openLogBtn" type="button">Open log</button>
+                  </div>
+                </div>
               </div>
             </div>
+          </details>
+
+          <details class="settings-section-collapse" id="settings-sec-about">
+            <summary class="settings-section-summary">
+              <span class="sec-title">About</span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="settings-row settings-row-stack">
+                <div class="settings-row-main">
+                  <div class="lbl">supr.bar <span id="aboutVersion">v0.7</span></div>
+                  <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">1–7</span> ranges · <span class="mono">Ctrl+C</span> copy · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> help</div>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="settings-foot flyout-foot">
+          <span class="settings-foot-hint">Config snapshot</span>
+          <div class="actions">
+            <button class="btn-sm" id="exportConfigBtn" data-tip="Download a config snapshot">Export</button>
+            <button class="btn-sm" id="importConfigBtn" data-tip="Restore from a snapshot">Import</button>
+            <button class="btn-sm danger" id="resetConfigBtn" data-tip="Restore defaults (keeps API key)">Reset</button>
+            <input type="file" id="importFileInput" accept="application/json" hidden>
           </div>
         </div>
       </div>
@@ -257,7 +324,8 @@
       <li><span class="sh-desc">Open settings</span><kbd>Ctrl</kbd><kbd>,</kbd></li>
       <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl</kbd><kbd>L</kbd></li>
       <li><span class="sh-desc">Focus API key</span><kbd>Ctrl</kbd><kbd>K</kbd></li>
-      <li><span class="sh-desc">Export today</span><kbd>Ctrl</kbd><kbd>E</kbd></li>
+      <li><span class="sh-desc">Export CSV</span><kbd>Ctrl</kbd><kbd>E</kbd></li>
+      <li><span class="sh-desc">Refresh</span><kbd>Space</kbd></li>
       <li><span class="sh-desc">Copy summary</span><kbd>Ctrl</kbd><kbd>C</kbd></li>
       <li><span class="sh-desc">Switch ranges</span><kbd>1</kbd>…<kbd>7</kbd></li>
       <li><span class="sh-desc">Hide window</span><kbd>Ctrl</kbd><kbd>W</kbd></li>

@@ -16,8 +16,9 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.6 — usage command center. Coach experiment removed;
-> focus is multi-source spend tracking and budgets.
+> **Status:** v0.7 — lean & honest. Settings trimmed to a focused, fully-wired
+> set (no more dead toggles); offline-first (no remote fonts); brand-consistent
+> tray icon. Focus stays on multi-source spend tracking and budgets.
 
 ## What it does
 
@@ -81,9 +82,8 @@ register it in `aggregator.py`. See [`docs/extending.md`](./docs/extending.md).
 
 ## Roadmap (high-level)
 
-- **v0.6** — impact insights, provider cards, live/session controls, usability polish
-- **v0.6** — Cursor / Codex CLI local log providers
-- **v0.7** — unified multi-source totals + per-source filters
+- **v0.7** _(this release)_ — lean, fully-wired settings (74 → ~40), offline-first, brand-consistent tray, bug fixes
+- **next** — Cursor / Codex CLI local log providers; unified multi-source totals + per-source filters
 - **v1.0** — macOS + Linux tray ports
 
 ## Contributing

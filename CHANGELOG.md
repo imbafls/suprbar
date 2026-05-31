@@ -1,5 +1,135 @@
 # supr.bar CHANGELOG
 
+## v0.7.0 — lean & honest (100 improvements)
+
+The app drifted into 74 settings — about half of them switches that did
+nothing. This release cuts the dead weight, wires up the toggles worth keeping,
+fixes the bugs that audit turned up, and removes the code no one calls. Every
+visible setting now does something; the only network dependency (Google Fonts)
+is gone; and the tray icon finally matches the terracotta flyout.
+
+### Simplified the settings surface (74 → 42, every one wired)
+1. Removed `range.compare_previous` (labeled "planned", did nothing).
+2. Removed `range.custom_start` (no custom-range UI exists).
+3. Removed `range.custom_end` (same).
+4. Trimmed the `range.default` enum to the seven real tabs (dropped `yesterday`/`custom`, added `week`/`month`).
+5. Removed `display.currency` (cosmetic; app is USD-only).
+6. Removed `display.locale` (never applied to number formatting).
+7. Removed `budgets.audio_alert` (no audio path).
+8. Removed `budgets.quiet_hours` (no alert scheduler).
+9. Removed `budgets.quiet_start`.
+10. Removed `budgets.quiet_end`.
+11. Removed `behavior.show_in_taskbar` (popup is always a tool window).
+12. Removed `behavior.start_minimized` (boot is always tray-only).
+13. Removed `behavior.single_instance` (the mutex is unconditional).
+14. Removed `behavior.open_dashboard_on_click` (tray click is hardcoded).
+15. Removed `keyboard.enable_global` (global hotkeys never implemented).
+16. Removed `keyboard.hotkey_toggle`.
+17. Removed `keyboard.hotkey_refresh`.
+18. Removed `keyboard.hotkey_settings`.
+19. Removed `keyboard.hotkey_quit`.
+20. Removed `keyboard.hotkey_export`.
+21. Removed `keyboard.hotkey_copy_cost`.
+22. Removed `keyboard.vim_keys` — the whole **Keyboard** section is gone (shortcuts are fixed in the client).
+23. Removed `data.log_retention_days`.
+24. Removed `data.anonymize_logs`.
+25. Removed `data.cache_ttl_seconds`.
+26. Removed `data.telemetry` — honoring the README's "no telemetry" promise.
+27. Removed `window.anchor`.
+28. Removed `window.margin_px`.
+29. Removed `window.preferred_monitor`.
+30. Removed `window.remember_position`.
+31. Removed `window.opacity`.
+32. Removed `sources.cost_mode` (aggregator never branched on it).
+33. Removed `sources.anthropic_api.poll_seconds` (cadence is fixed).
+34. Added a schema-v3 migration that prunes removed keys from existing configs on load.
+35. The migration normalizes a now-invalid saved `range.default` back to `today`.
+
+### Made half-built toggles actually work
+36. `display.cost_format` now switches the hero between cents and whole dollars.
+37. `display.token_format` now switches token counts between `1.2k` and `1,234`.
+38. `display.show_model` now hides the Model tile.
+39. `display.show_project` now hides the footer project.
+40. `display.show_sessions_today` now hides the Sessions tile.
+41. `budgets.notify` now pops a toast when a budget crosses its threshold/limit.
+42. Display changes repaint the flyout instantly instead of waiting for the next poll.
+
+### Bug fixes
+43. **Manual refresh no longer hammers the server** — `setInterval(load, 0)` spun a ~4 ms loop; "0 = manual" now actually stops polling.
+44. Tray refresh loop had identical `if/else` branches; collapsed and removed the dead source-change probe.
+45. Range view could render literal `undefined sess · undefined proj` — guarded.
+46. Space-to-refresh stole activation from focused buttons/tabs/links — now bails on interactive controls.
+47. `body.offline .cost-num` targeted a class that doesn't exist — fixed to `.cost`, so the offline dim works.
+48. Duplicate `.btn-sm.primary` left the Export button stale blue — removed; it's terracotta now.
+49. Cache-savings estimate charged **all** cache reads at the priciest model's rate — now attributed per model.
+50. Single-instance check ran *after* the HTTP server started, leaking the socket/thread on a duplicate launch — moved to the top of `main()`.
+51. Admin-API `User-Agent` was hardcoded `suprbar/0.1` — now derived from `__version__`.
+52. Corrected the swapped app.js header note (Ctrl+L opens logs, Ctrl+K focuses key).
+53. Today CSV's session count used a 1–2 heuristic — now uses `insights.sessions_today`.
+
+### Removed dead backend code
+54. Deleted `scanner.scan()` (~70 lines, no callers).
+55. Deleted its `scanner._empty_scan()` helper.
+56. Deleted its `scanner._proj_totals()` helper.
+57. Deleted `aggregator._now_iso()` (unused).
+58. Removed the unused `/api/projects` route and `_projects_payload`.
+59. Removed the unused `/api/sources` route and `_sources_payload`.
+60. Removed the unused `/api/sources/{id}` route and `_source_by_id`.
+61. Removed the unused `GET /api/window-state` route.
+62. Removed the unused `POST /api/window-state` route.
+63. Removed the duplicate window-state implementation from `config.py` (popup owns it).
+64. Removed now-orphaned `config.local_data_dir()`.
+65. Removed the dead `config.click_through()` accessor.
+66. Removed `server.try_bind()` (no longer called).
+67. Removed `import socket` from `__main__.py`.
+68. Removed the redundant port-ping single-instance path and its `urllib` imports.
+
+### Removed dead frontend code
+69. Deleted `renderSourcesPanel()` (drove a `#sourcesPanel` that doesn't exist).
+70. Deleted three click handlers for DOM nodes that were removed (`#anthropicToggle`/`#pinnedToggle`/`#startupToggle`).
+71. Deleted the orphaned `setToggle()` / `toggleValue()` helpers.
+72. Cleaned `loadConfig()` of references to removed nodes.
+73. Pointed `applyTabOrder()` at controls that still exist.
+74. Dropped a write to a non-existent toggle in `runTestKey`.
+75. Pruned 32 stale entries from the settings `LABELS` map.
+76. Removed `keyboard` from the settings nav/order and its render special-case.
+
+### Removed dead / duplicate CSS
+77. Deleted unused `.settings-section-title`.
+78. Deleted unused bare `.settings-section`.
+79. Deleted unused `.settings-section[data-section]`.
+80. Deleted duplicate `.settings-section.empty-section`.
+81. Deleted legacy `.settings-actions`.
+82. De-duplicated the split `body.compact` block.
+
+### Brand consistency (terracotta everywhere)
+83. Tray icon gradient switched from leftover blue/violet to the flyout's terracotta.
+84. Focus-ring glow recolored from stale blue to the accent.
+85. Empty-state glyph glows recolored to terracotta.
+86. Project-bar gradient recolored to terracotta.
+87. Tag-chip / tag-input highlight recolored to the accent.
+88. Settings-search focus border recolored to the accent.
+89. Input / select / range-thumb focus states recolored to the accent.
+
+### Offline & security
+90. Removed the Google Fonts `<link>` tags — fully offline on the system font stack.
+91. Tightened the CSP to drop the `fonts.googleapis.com` / `fonts.gstatic.com` allowances.
+
+### Accessibility & UX
+92. Range tabs carry `aria-selected` at load, so a screen reader sees the active tab.
+93. Added a `#mModelCell` wrapper so the Show-model toggle hides the tile cleanly.
+
+### Diagnostics
+94. Wired each provider's `self_test()` into `/api/diagnostics` (per-source health + last error).
+95. Surfaced per-model `cache_read` from the scanner (feeds the accurate savings estimate).
+
+### Docs & release
+96. Bumped `__version__` 0.6.0 → 0.7.0.
+97. Bumped installer `MyAppVersion` 0.6.0 → 0.7.0 (keeps the asset name in step with the tag).
+98. README: status → v0.7, de-duplicated the roadmap, range list matches the real tabs.
+99. Fixed the non-existent `suprbar/static/themes/` guidance (extending.md + CONTRIBUTING) and stale "v0.5 adds…" tense; corrected `build_brand.py`'s output-path docstring.
+100. Refreshed module docstrings (scanner/server/config) and the app.js header to match the trimmed surface.
+
 ## v0.6.0 — usage command center
 
 - Adds impact insights: projected spend, average cost per message, cache savings,

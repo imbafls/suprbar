@@ -222,9 +222,12 @@ def _compute_cache_savings(sources_data: list[dict[str, Any]],
                            total_cache_read: int) -> float:
     """Approximate USD saved by cache reads vs. uncached input.
 
-    Uses pricing.cache_savings_for per model when we know the split
-    (preferred — accurate for Haiku/Sonnet); falls back to a flat
-    opus-rate estimate if we only have a bulk cache_read total.
+    The local scanner now tracks ``cache_read`` per model, so we sum
+    pricing.cache_savings_for at each model's own input rate — accurate for
+    mixed Haiku/Sonnet/Opus usage instead of charging everything at the
+    priciest model's rate. Any cache_read not attributable to a model (e.g.
+    from the Admin API source) is estimated at the opus rate as a
+    conservative upper bound.
     """
     if total_cache_read <= 0:
         return 0.0
@@ -238,18 +241,18 @@ def _compute_cache_savings(sources_data: list[dict[str, Any]],
             by_model = list(s.get("extras", {}).get("by_model", []) or [])
             break
 
-    # The local scanner's by_model tracks total tokens (not just cache_read)
-    # so we can't reliably attribute cache_read by model from it alone.
-    # Use the top-cost model as a proxy if available; otherwise opus rates.
-    if by_model:
-        proxy_model = by_model[0]["model"]
-        return cache_savings_for(
-            {"cache_read_input_tokens": total_cache_read}, proxy_model)
-    # No model info — assume opus (highest, conservative-upper-bound saving).
-    rate = PRICING["opus"]["input"]
-    return (total_cache_read * rate * 0.9) / 1_000_000
+    saved = 0.0
+    attributed = 0
+    for m in by_model:
+        cr = int(m.get("cache_read", 0) or 0)
+        if cr <= 0:
+            continue
+        saved += cache_savings_for(
+            {"cache_read_input_tokens": cr}, m.get("model", ""))
+        attributed += cr
 
-
-def _now_iso() -> str:
-    """Local-tz ISO timestamp (kept for backward compat with any callers)."""
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    leftover = max(0, total_cache_read - attributed)
+    if leftover:
+        rate = PRICING["opus"]["input"]
+        saved += (leftover * rate * 0.9) / 1_000_000
+    return saved
