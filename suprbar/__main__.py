@@ -102,6 +102,9 @@ def main() -> int:
 
     server.set_quit_callback(shutdown_app)
     updater.set_quit_fn(shutdown_app)
+    # Best-effort: clear leftover installer temp dirs from a prior update.
+    threading.Thread(target=updater.cleanup_stale_downloads, daemon=True,
+                     name="suprbar-upd-cleanup").start()
 
     # Signal handling. SIGINT works on all platforms; SIGTERM only off-Windows.
     try:

@@ -346,6 +346,24 @@ def _delayed_quit(fn) -> None:
         log.exception("quit during update failed")
 
 
+def cleanup_stale_downloads(max_age_hours: int = 24) -> None:
+    """Best-effort sweep of leftover ``suprbar_upd_*`` temp dirs from prior
+    updates. The apply path intentionally keeps its tempdir (the installer needs
+    the file), so a completed or interrupted update can leave one behind; clean
+    anything older than ``max_age_hours`` on launch. Never raises."""
+    try:
+        base = Path(tempfile.gettempdir())
+        cutoff = time.time() - max_age_hours * 3600
+        for p in base.glob("suprbar_upd_*"):
+            try:
+                if p.is_dir() and p.stat().st_mtime < cutoff:
+                    shutil.rmtree(p, ignore_errors=True)
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001
+        log.debug("stale-download cleanup failed", exc_info=True)
+
+
 def download_and_apply(quit_fn=None) -> dict:
     """Download → validate (host+name+size[+digest]) → launch installer →
     clean-quit. Returns {ok, message?, error?}. Runs ON A WORKER THREAD

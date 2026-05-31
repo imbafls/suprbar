@@ -1,5 +1,15 @@
 # supr.bar CHANGELOG
 
+## v0.10.1 — updater shakedown
+
+- **First release that exercises the in-app auto-updater end to end** (v0.10.0 →
+  v0.10.1). On the installed v0.10.0 build, the flyout shows an "Update
+  available — v0.10.1" banner (and the tray an "Update to v0.10.1…" item); one
+  click downloads, verifies, and installs this.
+- **Tidies up after itself.** The apply path keeps its download dir while the
+  installer runs, so leftover `suprbar_upd_*` folders are now swept from the temp
+  dir on launch (anything older than 24h).
+
 ## v0.10.0 — in-app auto-update
 
 supr.bar can now update itself. No more checking Releases by hand — when a new
