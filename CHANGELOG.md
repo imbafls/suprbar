@@ -1,5 +1,12 @@
 # supr.bar CHANGELOG
 
+## v0.10.3 — updater live-test target
+
+- A target release so an installed **v0.10.2** build can exercise the in-app
+  one-click update end to end (v0.10.2 → v0.10.3): the flyout banner, **Update**,
+  download + verify, silent install, and relaunch into the new version. No
+  functional changes beyond the version bump.
+
 ## v0.10.2 — updater download-host fix
 
 - **Critical updater fix.** GitHub serves release-asset downloads from
