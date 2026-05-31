@@ -1,5 +1,46 @@
 # supr.bar CHANGELOG
 
+## v0.8.0 — glance-first redesign
+
+A full visual redesign, integrated from a Claude Design handoff. The flyout was
+busy — a wall of numbers you had to scroll. This rebuilds it **glance-first**:
+the one thing you open it 50× a day to learn — *what am I spending, will I blow
+budget today* — is answered in one eyeful, with everything else folded away.
+
+The data, behavior, hooks, settings, and shortcuts are unchanged. Only the look
+and the information hierarchy changed.
+
+### New visual system
+- **Cool neutral near-black base** (`#0b0c0e`) with a refined **indigo** accent
+  (the new default). Five accents ship; all route through a single `--b-accent`
+  via `oklch` + `color-mix`, so switching accent recolours the entire UI — token
+  bar, project bars, budget fill, focus rings, chips — with no hardcoded hex.
+- **System font stack** (Segoe UI) for UI, **tabular mono** for every number;
+  the hero `$` is mono with de-emphasized cents. No remote fonts.
+- Dark + light themes, density (compact/normal/spacious), and font-scale
+  (0.85×–1.25×) all drive off CSS variables.
+
+### Glance-first information architecture
+- The active popup fits hero → live + projected → budget → "Now burning" in
+  360×480 with **no scroll**.
+- **"Now burning" card** promotes the live session actually spending money into
+  a focal object (project · model · $cost · msgs · burn $/h).
+- **Budget "fuel gauge"** — `$spent / $limit`, bar, and `$X left` with a derived
+  **"on pace to go over by $Y"** line (computed from today's projected spend vs
+  the daily limit; no new data).
+- **Projected hero signal** — `▲ projected $X`, amber when projected spend would
+  exceed the daily budget.
+- Everything secondary (token mix, hourly sparkline, metric grid, other live
+  sessions, source cards, top projects) folds behind a **Details** disclosure —
+  the only state that scrolls.
+
+### Polish
+- Settings overlay restyled to the new system (quick chips, section nav,
+  swatches, sliders, tag inputs) — same schema-driven engine.
+- Tray icon retinted to the indigo gradient (`#5b8fe8 → #7a6cf0`), 22% corner
+  radius, live status dot `#2bd07a`.
+- Toast, context menu, shortcuts dialog, and tooltips moved onto the new tokens.
+
 ## v0.7.0 — lean & honest (100 improvements)
 
 The app drifted into 74 settings — about half of them switches that did

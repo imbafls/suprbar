@@ -10,214 +10,197 @@
 <body class="loading">
   <div id="root">
     <div class="flyout" id="flyout">
-      <!-- header -->
-      <div class="flyout-head" data-tip="Drag here to move">
-        <div class="title">
-          <span class="title-mark">S</span>
-          supr.bar
-          <span class="ver" id="headerVersion">v0.7</span>
-          <span class="dev-badge" id="devBadge" hidden>dev</span>
-        </div>
-        <div class="head-actions">
-          <button class="icon-btn" id="helpBtn" aria-label="Keyboard shortcuts" data-tip="Shortcuts (?)">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
+
+      <!-- header / drag handle -->
+      <header class="b-head" id="dragHandle" data-tip="Drag to move">
+        <span class="b-mark">S</span>
+        <span class="b-title">supr<span class="dot">.</span>bar</span>
+        <span class="b-badge" id="headerVersion">v0.8</span>
+        <span class="b-badge dev" id="devBadge" hidden>dev</span>
+        <span class="spacer"></span>
+        <div class="b-icons">
+          <button class="ibtn" id="helpBtn" aria-label="Keyboard shortcuts" data-tip="Shortcuts (?)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><circle cx="12" cy="17.5" r=".6" fill="currentColor"/></svg>
           </button>
-          <button class="icon-btn refresh-btn" id="refreshBtn" aria-label="Refresh data" data-tip="Refresh (F5)">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
-              <polyline points="21 3 21 9 15 9"/>
-            </svg>
+          <button class="ibtn" id="refreshBtn" aria-label="Refresh data" data-tip="Refresh (F5)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
           </button>
-          <button class="icon-btn pin-btn" id="pinBtn" aria-label="Pin popup (don't auto-hide)" data-tip="Pin (don't auto-hide)">
-            <!-- pin icon -->
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 17v5"/>
-              <path d="M15 9.34V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v3.34a3 3 0 0 1-1.41 2.55L6 13h12l-1.59-1.11A3 3 0 0 1 15 9.34Z"/>
-            </svg>
+          <button class="ibtn" id="pinBtn" aria-pressed="false" aria-label="Pin popup (don't auto-hide)" data-tip="Pin (don't auto-hide)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"/><path d="M12 15v5"/></svg>
           </button>
-          <button class="icon-btn" id="settingsBtn" aria-label="Open settings" data-tip="Settings (Ctrl+,)">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
+          <button class="ibtn" id="settingsBtn" aria-label="Open settings" data-tip="Settings (Ctrl+,)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12.5a7 7 0 0 0 .1-1l1.5-1.2-1.5-2.6-1.9.5a7 7 0 0 0-1.6-1L15 4h-3l-.3 2.2a7 7 0 0 0-1.6 1l-1.9-.5L6.7 9.3 8.2 10.5a7 7 0 0 0 0 1.9L6.7 13.6l1.5 2.6 1.9-.5a7 7 0 0 0 1.6 1L12 19h3l.3-2.2a7 7 0 0 0 1.6-1l1.9.5 1.5-2.6-1.5-1.2z"/></svg>
           </button>
         </div>
-      </div>
+      </header>
 
       <!-- range tabs -->
-      <div class="range-tabs" id="rangeTabs" role="tablist" aria-label="Time range">
-        <button class="rt active" role="tab" aria-selected="true"  data-range="today"     data-tip="Today">Today</button>
-        <button class="rt"        role="tab" aria-selected="false" data-range="24h"       data-tip="Rolling 24 hours">24h</button>
-        <button class="rt"        role="tab" aria-selected="false" data-range="7d"        data-tip="Last 7 days">7d</button>
-        <button class="rt"        role="tab" aria-selected="false" data-range="week"      data-tip="This calendar week">Wk</button>
-        <button class="rt"        role="tab" aria-selected="false" data-range="month"     data-tip="This calendar month">Mo</button>
-        <button class="rt"        role="tab" aria-selected="false" data-range="30d"       data-tip="Last 30 days">30d</button>
-        <button class="rt"        role="tab" aria-selected="false" data-range="90d"       data-tip="Last 90 days">90d</button>
+      <div class="b-tabs range-tabs" id="rangeTabs" role="tablist" aria-label="Time range">
+        <button class="rt active" role="tab" aria-selected="true"  data-range="today" data-tip="Today">Today</button>
+        <button class="rt" role="tab" aria-selected="false" data-range="24h"   data-tip="Rolling 24 hours">24h</button>
+        <button class="rt" role="tab" aria-selected="false" data-range="7d"    data-tip="Last 7 days">7d</button>
+        <button class="rt" role="tab" aria-selected="false" data-range="week"  data-tip="This calendar week">Wk</button>
+        <button class="rt" role="tab" aria-selected="false" data-range="month" data-tip="This calendar month">Mo</button>
+        <button class="rt" role="tab" aria-selected="false" data-range="30d"   data-tip="Last 30 days">30d</button>
+        <button class="rt" role="tab" aria-selected="false" data-range="90d"   data-tip="Last 90 days">90d</button>
       </div>
 
-      <div class="conn-banner" id="connBanner" hidden role="status">
-        <span id="connBannerText">Offline — retrying…</span>
-        <button class="btn-sm" type="button" id="connRetryBtn">Retry</button>
+      <!-- offline / connection banner -->
+      <div class="conn" id="connBanner" hidden role="alert">
+        <span class="cpip"></span>
+        <span class="ctext" id="connBannerText">Offline — retrying…</span>
+        <button class="cretry" type="button" id="connRetryBtn">Retry</button>
       </div>
 
       <div class="flyout-body" id="flyoutBody">
-      <!-- cost block -->
-      <div class="cost-block" id="costBlock">
-        <div class="cost-eyebrow">
-          <span id="costLabel">Today · Claude Code</span>
-          <span class="right" id="liveIndicator">
-            <span class="pulse-dot"></span>
-            session live
-          </span>
-        </div>
-        <div class="budget-strip" id="budgetStrip" hidden>
-          <div class="bs-row">
-            <span class="bs-label">Budget</span>
-            <div class="bs-bar"><div class="bs-fill" id="bsFill" style="width:0%"></div></div>
-            <span class="bs-pct" id="bsPct">—</span>
-            <span class="bs-remain" id="bsRemain"></span>
-          </div>
-        </div>
-        <div class="cost" id="costNum" aria-live="polite" aria-atomic="true">
-          <span class="currency">$</span><span id="costWhole">0</span><span class="cents" id="costCents">.00</span>
-        </div>
-        <div class="source-line" id="sourceLine" hidden></div>
 
-        <div class="impact-strip" id="impactStrip" aria-label="Usage insights">
-          <div class="impact-chip">
-            <span class="impact-label">Projected</span>
-            <span class="impact-value" id="iProjected">—</span>
+        <!-- ── glance: cost hero ── -->
+        <div class="cost-block" id="costBlock">
+          <div class="cost-eyebrow" id="costLabel">Today · Claude Code</div>
+          <div class="cost-num" id="costNum" aria-live="polite" aria-atomic="true">
+            <span class="cur">$</span><span class="cu-whole" id="costWhole">0</span><span class="cents cu-cents" id="costCents">.00</span>
           </div>
-          <div class="impact-chip">
-            <span class="impact-label">Avg/msg</span>
-            <span class="impact-value" id="iAvgMsg">—</span>
-          </div>
-          <div class="impact-chip">
-            <span class="impact-label">Saved</span>
-            <span class="impact-value" id="iSaved">—</span>
-          </div>
-          <div class="impact-chip">
-            <span class="impact-label">Top proj</span>
-            <span class="impact-value" id="iTopProj">—</span>
+          <div class="live-row">
+            <span class="live-ind" id="liveIndicator"><span class="pip"></span> <span id="liveCount">0</span> live</span>
+            <span class="hero-signal" id="iProjected"></span>
+            <span class="source-line" id="sourceLine" hidden></span>
           </div>
         </div>
 
-        <div class="status-strip" id="statusStrip" aria-label="Scan status"></div>
+        <!-- ── glance: budget fuel gauge ── -->
+        <div class="fuel" id="budgetStrip" hidden>
+          <div class="fuel-top">
+            <span class="lbl">Daily budget</span>
+            <span class="amt" id="bsAmt">$0 <span class="lim">/ $0</span></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" id="bsFill" style="width:0%"></div></div>
+          <div class="fuel-sub">
+            <span id="bsRemain"></span>
+            <span class="sep" id="bsSep">·</span>
+            <span id="bsPct" hidden>—</span>
+            <span class="over" id="bsPace"></span>
+          </div>
+        </div>
 
-        <div class="token-bar" aria-hidden="true">
-          <div class="tb-input"  id="tbIn"    style="width: 0%"></div>
-          <div class="tb-output" id="tbOut"   style="width: 0%"></div>
-          <div class="tb-cache"  id="tbCache" style="width: 0%"></div>
-        </div>
-        <div class="token-legend">
-          <span class="item" data-tip="Input tokens sent to the model"><span class="sw" style="background: var(--b-accent)"></span>in · <span id="legIn">0</span></span>
-          <span class="item" data-tip="Output tokens generated"><span class="sw" style="background: var(--b-violet)"></span>out · <span id="legOut">0</span></span>
-          <span class="item" data-tip="Cached prompt tokens"><span class="sw" style="background: var(--b-success)"></span>cache · <span id="legCache">0</span></span>
-          <span class="cache-hit" id="cacheHit" data-tip="Cache hit ratio"></span>
+        <!-- ── glance: now burning (the live session actually spending) ── -->
+        <div class="nowcard" id="liveSessions" hidden>
+          <div class="nc-head">
+            <span class="nc-tag"><span class="pip"></span>Now burning</span>
+            <span class="nc-ago" id="ncAgo"></span>
+          </div>
+          <div class="nc-main">
+            <span class="nc-proj" id="ncProj">—</span>
+            <span class="nc-cost" id="ncCost">$0.00</span>
+          </div>
+          <div class="nc-sub">
+            <span class="nc-meta" id="ncMeta"></span>
+            <span class="nc-burn" id="ncBurn"></span>
+          </div>
         </div>
 
-        <div class="hourly-spark" id="hourlySpark" aria-label="Hourly spend sparkline"></div>
-      </div>
+        <!-- ── glance: two key chips ── -->
+        <div class="keychips impact" id="impactStrip" aria-label="Usage insights">
+          <div class="chip"><span class="k">Avg / msg</span><span class="v" id="iAvgMsg">—</span></div>
+          <div class="chip"><span class="k">Cache saved</span><span class="v good" id="iSaved">—</span></div>
+        </div>
 
-      <!-- metric row (active) -->
-      <div class="metric-row" id="metricRow">
-        <div class="metric">
-          <div class="metric-label">Messages</div>
-          <div class="metric-value" id="mMessages">—</div>
+        <!-- ── idle empty state ── -->
+        <div class="empty" id="emptyState" role="status" hidden>
+          <div class="glyph">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+          </div>
+          <div class="e-ttl">No sessions running</div>
+          <div class="e-sub" id="emptySub">watching ~/.claude</div>
         </div>
-        <div class="metric" id="mModelCell">
-          <div class="metric-label">Model</div>
-          <div class="metric-value small" id="mModel">—</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Started</div>
-          <div class="metric-value small" id="mStarted">—</div>
-        </div>
-        <div class="metric" id="mBurnCell">
-          <div class="metric-label">Burn</div>
-          <div class="metric-value small" id="mBurn">—</div>
-        </div>
-        <div class="metric" id="mSessionsCell">
-          <div class="metric-label">Sessions</div>
-          <div class="metric-value small" id="mSessions">—</div>
-        </div>
-      </div>
 
-      <div class="source-cards" id="sourceCards" hidden></div>
+        <!-- ── Details: everything secondary folds here ── -->
+        <details class="more" id="detailsFold">
+          <summary>
+            <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
+            Details<span class="more-meta">token mix · hourly · projects</span>
+          </summary>
+          <div class="more-body">
 
-      <!-- live sessions (from local JSONL scan) -->
-      <div class="live-sessions" id="liveSessions" hidden>
-        <div class="live-sessions-head">
-          <span class="live-title">Live now</span>
-          <span class="live-count" id="liveCount">0</span>
-        </div>
-        <div class="live-session-list" id="liveSessionList"></div>
-      </div>
+            <!-- scan status pills -->
+            <div class="status-strip status" id="statusStrip" aria-label="Scan status"></div>
 
-      <!-- top projects mini-list -->
-      <details class="projects-list" id="projectsList">
-        <summary>
-          <span class="proj-title" id="projectsListTitle">Top projects</span>
-          <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </summary>
-        <ol id="projectsListItems"></ol>
-      </details>
+            <!-- token mix -->
+            <div class="tokens">
+              <div class="tok-head"><span class="ttl">Token mix</span><span class="cache-hit" id="cacheHit" data-tip="Cache hit ratio"></span></div>
+              <div class="tok-bar">
+                <span class="tb-in"    id="tbIn"    style="width:0%"></span>
+                <span class="tb-out"   id="tbOut"   style="width:0%"></span>
+                <span class="tb-cache" id="tbCache" style="width:0%"></span>
+              </div>
+              <div class="tok-legend">
+                <span class="li"><span class="sw in"></span>in <b id="legIn">0</b></span>
+                <span class="li"><span class="sw out"></span>out <b id="legOut">0</b></span>
+                <span class="li"><span class="sw cache"></span>cache <b id="legCache">0</b></span>
+              </div>
+            </div>
 
-      <!-- empty state (idle) -->
-      <div class="empty-state" id="emptyState" role="status" hidden>
-        <div class="glyph">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-            <defs>
-              <filter id="emptyGlow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="2.2" result="b"/>
-                <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-            </defs>
-            <circle cx="24" cy="24" r="18" stroke="rgba(91,141,239,0.28)" stroke-width="1" filter="url(#emptyGlow)"/>
-            <circle cx="24" cy="24" r="13" stroke="rgba(140,91,239,0.22)" stroke-width="1"/>
-            <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
-              <circle cx="24" cy="24" r="9"/>
-              <polyline points="24 18 24 24 28 26"/>
-            </g>
-          </svg>
-        </div>
-        <div class="t">No sessions running</div>
-        <div class="s" id="emptySub">watching ~/.claude</div>
-      </div>
+            <!-- hourly sparkline -->
+            <div class="spark">
+              <div class="spark-head">Spend by hour</div>
+              <div class="hourly-spark" id="hourlySpark" aria-label="Hourly spend sparkline"></div>
+            </div>
+
+            <!-- metric grid -->
+            <div class="metrics" id="metricRow">
+              <div class="mtile"><span class="k">Messages</span><span class="v" id="mMessages">—</span></div>
+              <div class="mtile" id="mModelCell"><span class="k">Model</span><span class="v" id="mModel">—</span></div>
+              <div class="mtile"><span class="k">Started</span><span class="v" id="mStarted">—</span></div>
+              <div class="mtile" id="mBurnCell"><span class="k">Burn</span><span class="v" id="mBurn">—</span></div>
+              <div class="mtile" id="mSessionsCell"><span class="k">Sessions</span><span class="v" id="mSessions">—</span></div>
+            </div>
+
+            <!-- top-project chip -->
+            <div class="chip" style="align-self:flex-start"><span class="k">Top proj</span><span class="v" id="iTopProj">—</span></div>
+
+            <!-- other live sessions -->
+            <div class="live-sessions" id="otherLive">
+              <div class="sec-ttl">Other live</div>
+              <div class="rows live-session-list" id="liveSessionList"></div>
+            </div>
+
+            <!-- multi-source cards -->
+            <div class="sources source-cards" id="sourceCards" hidden></div>
+
+            <!-- top projects -->
+            <details class="collapse projects-list" id="projectsList" open>
+              <summary>
+                <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
+                <span class="proj-title sec-ttl" id="projectsListTitle" style="flex:0">Top projects</span>
+                <span class="count" id="projectsListCount"></span>
+              </summary>
+              <ol id="projectsListItems"></ol>
+            </details>
+
+          </div>
+        </details>
+
       </div><!-- /.flyout-body -->
 
       <!-- footer -->
-      <div class="flyout-foot">
-        <span id="footMeta">watching ~/.claude</span>
-        <div class="actions">
-          <button class="btn-sm primary" id="exportBtn" data-tip="Export CSV (Ctrl+E)">Export</button>
-          <button class="btn-sm" id="copySummaryBtn" data-tip="Copy usage summary (Ctrl+C)">Copy</button>
-          <button class="btn-sm" id="copyPathBtn" data-tip="Copy scan path">Path</button>
-          <button class="btn-sm" id="openActiveBtn" data-tip="Open active session file">Active</button>
-          <button class="btn-sm" id="openLogsBtn" data-tip="Open ~/.claude/projects (Ctrl+L)">Logs</button>
+      <footer class="b-foot flyout-foot">
+        <span class="meta" id="footMeta">watching ~/.claude</span>
+        <div class="foot-actions actions">
+          <button class="txtbtn primary" id="exportBtn" data-tip="Export CSV (Ctrl+E)">Export</button>
+          <button class="txtbtn" id="copySummaryBtn" data-tip="Copy usage summary (Ctrl+C)">Copy</button>
+          <button class="txtbtn" id="copyPathBtn" data-tip="Copy scan path">Path</button>
+          <button class="txtbtn" id="openActiveBtn" data-tip="Open active session file">Active</button>
+          <button class="txtbtn" id="openLogsBtn" data-tip="Open ~/.claude/projects (Ctrl+L)">Logs</button>
         </div>
-      </div>
+      </footer>
 
-      <!-- settings overlay (hidden by default) -->
+      <!-- settings overlay (slides up; hidden by default) -->
       <div class="settings-overlay" id="settingsOverlay" hidden>
         <div class="settings-head">
-          <div class="title">
-            <span class="title-mark">S</span>
-            Settings
-          </div>
+          <div class="title"><span class="title-mark">S</span>Settings</div>
           <div class="settings-head-tools">
-            <input type="search" id="settingsSearch" class="settings-search" placeholder="Filter settings…" aria-label="Filter settings">
-            <button class="icon-btn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
+            <input type="search" id="settingsSearch" class="settings-search" placeholder="Search settings…" aria-label="Filter settings">
+            <button class="ibtn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
             </button>
           </div>
         </div>
@@ -233,9 +216,7 @@
           <div class="settings-status" id="settingsStatus" hidden role="status"></div>
 
           <details class="settings-section-collapse" id="settings-sec-key" data-section="key" open>
-            <summary class="settings-section-summary">
-              <span class="sec-title">Anthropic API Key</span>
-            </summary>
+            <summary class="settings-section-summary"><span class="sec-title">Anthropic API Key</span></summary>
             <div class="settings-section-body">
               <div class="settings-row settings-row-stack">
                 <div class="settings-row-main">
@@ -260,9 +241,7 @@
           </div>
 
           <details class="settings-section-collapse" id="settings-sec-diagnostics">
-            <summary class="settings-section-summary">
-              <span class="sec-title">Diagnostics</span>
-            </summary>
+            <summary class="settings-section-summary"><span class="sec-title">Diagnostics</span></summary>
             <div class="settings-section-body">
               <div class="settings-row settings-row-stack">
                 <div class="settings-row-main">
@@ -277,13 +256,11 @@
           </details>
 
           <details class="settings-section-collapse" id="settings-sec-about">
-            <summary class="settings-section-summary">
-              <span class="sec-title">About</span>
-            </summary>
+            <summary class="settings-section-summary"><span class="sec-title">About</span></summary>
             <div class="settings-section-body">
               <div class="settings-row settings-row-stack">
                 <div class="settings-row-main">
-                  <div class="lbl">supr.bar <span id="aboutVersion">v0.7</span></div>
+                  <div class="lbl">supr.bar <span id="aboutVersion">v0.8</span></div>
                   <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">1–7</span> ranges · <span class="mono">Ctrl+C</span> copy · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> help</div>
                 </div>
               </div>
@@ -291,9 +268,9 @@
           </details>
         </div>
 
-        <div class="settings-foot flyout-foot">
+        <div class="settings-foot b-foot">
           <span class="settings-foot-hint">Config snapshot</span>
-          <div class="actions">
+          <div class="foot-actions">
             <button class="btn-sm" id="exportConfigBtn" data-tip="Download a config snapshot">Export</button>
             <button class="btn-sm" id="importConfigBtn" data-tip="Restore from a snapshot">Import</button>
             <button class="btn-sm danger" id="resetConfigBtn" data-tip="Restore defaults (keeps API key)">Reset</button>
@@ -304,31 +281,26 @@
     </div>
   </div>
 
-  <!-- shortcuts help overlay -->
+  <!-- shortcuts help overlay (native <dialog>) -->
   <dialog id="shortcutsHelp" class="shortcuts-help" aria-label="Keyboard shortcuts">
     <div class="sh-head">
       <div class="title">Keyboard shortcuts</div>
-      <form method="dialog">
-        <button class="icon-btn" value="close" aria-label="Close shortcuts">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </form>
+      <form method="dialog"><button class="ibtn" value="close" aria-label="Close shortcuts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button></form>
     </div>
     <ul class="sh-list">
       <li><span class="sh-desc">Close popup</span><kbd>Esc</kbd></li>
       <li><span class="sh-desc">Refresh data</span><kbd>F5</kbd></li>
-      <li><span class="sh-desc">Quit app</span><kbd>Alt</kbd><kbd>Q</kbd></li>
-      <li><span class="sh-desc">Open settings</span><kbd>Ctrl</kbd><kbd>,</kbd></li>
-      <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl</kbd><kbd>L</kbd></li>
-      <li><span class="sh-desc">Focus API key</span><kbd>Ctrl</kbd><kbd>K</kbd></li>
-      <li><span class="sh-desc">Export CSV</span><kbd>Ctrl</kbd><kbd>E</kbd></li>
+      <li><span class="sh-desc">Quit app</span><kbd>Alt+Q</kbd></li>
+      <li><span class="sh-desc">Open settings</span><kbd>Ctrl+,</kbd></li>
+      <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl+L</kbd></li>
+      <li><span class="sh-desc">Focus API key</span><kbd>Ctrl+K</kbd></li>
+      <li><span class="sh-desc">Export CSV</span><kbd>Ctrl+E</kbd></li>
       <li><span class="sh-desc">Refresh</span><kbd>Space</kbd></li>
-      <li><span class="sh-desc">Copy summary</span><kbd>Ctrl</kbd><kbd>C</kbd></li>
-      <li><span class="sh-desc">Switch ranges</span><kbd>1</kbd>…<kbd>7</kbd></li>
-      <li><span class="sh-desc">Hide window</span><kbd>Ctrl</kbd><kbd>W</kbd></li>
+      <li><span class="sh-desc">Copy summary</span><kbd>Ctrl+C</kbd></li>
+      <li><span class="sh-desc">Switch ranges</span><kbd>1–7</kbd></li>
+      <li><span class="sh-desc">Hide window</span><kbd>Ctrl+W</kbd></li>
       <li><span class="sh-desc">This help</span><kbd>?</kbd></li>
     </ul>
   </dialog>

@@ -65,7 +65,7 @@ DEFAULTS: dict[str, Any] = {
     # ---- Display prefs ----
     "display": {
         "theme":       "dark",         # dark|light|auto
-        "accent":      "orange",       # violet|blue|green|orange|pink (orange = supr default)
+        "accent":      "blue",         # violet|blue|green|orange|pink (blue = refined indigo, the redesign default)
         "density":     "normal",       # compact|normal|spacious
         "font_scale":  1.0,            # 0.85..1.25
         "cost_format": "with_cents",   # with_cents|whole

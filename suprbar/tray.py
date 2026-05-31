@@ -31,15 +31,15 @@ PULSE_MS = 300
 # ---------- Icon drawing ----------
 
 def _gradient_image(size: int, palette: str = "default") -> Image.Image:
-    """Diagonal gradient. Palette accents vary: default = terracotta (matches
-    the flyout accent), warn = amber, danger = red."""
+    """Diagonal gradient. Palette accents vary: default = indigo (matches the
+    redesign accent, 135° #5b8fe8 → #7a6cf0), warn = amber, danger = red."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     if palette == "warn":
-        a, v = (251, 191, 36), (245, 158, 11)    # amber → orange
+        a, v = (242, 181, 58), (214, 150, 40)    # amber (#f2b53a)
     elif palette == "danger":
-        a, v = (248, 113, 113), (220, 38, 38)    # red gradient
+        a, v = (232, 81, 63), (198, 58, 44)      # red (#e8513f)
     else:
-        a, v = (217, 119, 87), (196, 104, 74)    # terracotta (--b-accent → --b-violet)
+        a, v = (91, 143, 232), (122, 108, 240)   # indigo (#5b8fe8 → #7a6cf0)
     px = img.load()
     denom = 2 * (size - 1) if size > 1 else 1
     for y in range(size):
@@ -71,7 +71,7 @@ def _draw_S(bg: Image.Image, brighter: bool = False) -> Image.Image:
     mask = Image.new("L", (size, size), 0)
     md = ImageDraw.Draw(mask)
     md.rounded_rectangle((0, 0, size - 1, size - 1),
-                         radius=int(size * 0.19), fill=255)
+                         radius=int(size * 0.22), fill=255)
     bg.putalpha(mask)
 
     # Draw text into a separate transparent overlay so we can sample at
@@ -116,7 +116,7 @@ def _add_live_dot(img: Image.Image) -> Image.Image:
         (x1 - halo, y1 - halo, x1 + dot + halo, y1 + dot + halo),
         fill=(255, 255, 255, 230),
     )
-    d.ellipse((x1, y1, x1 + dot, y1 + dot), fill=(58, 211, 138, 255))
+    d.ellipse((x1, y1, x1 + dot, y1 + dot), fill=(43, 208, 122, 255))  # live #2bd07a
     return out
 
 

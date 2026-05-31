@@ -212,44 +212,63 @@ function shortProject(name) {
 }
 
 function renderLiveSessions(d) {
-  const wrap = document.getElementById('liveSessions');
+  // Glance-first: the lead session is promoted to the "Now burning" card
+  // (#liveSessions); the rest fold into "Other live" rows (#liveSessionList).
+  const card = document.getElementById('liveSessions');
+  const otherWrap = document.getElementById('otherLive');
   const list = document.getElementById('liveSessionList');
   const countEl = document.getElementById('liveCount');
-  if (!wrap || !list) return;
 
   const sessions = Array.isArray(d.live_sessions) ? d.live_sessions : [];
+  if (countEl) countEl.textContent = String(sessions.length);
+
   if (!sessions.length) {
-    wrap.hidden = true;
-    list.innerHTML = '';
-    if (countEl) countEl.textContent = '0';
+    if (card) card.hidden = true;
+    if (otherWrap) otherWrap.hidden = true;
+    if (list) list.innerHTML = '';
     return;
   }
 
-  wrap.hidden = false;
-  if (countEl) countEl.textContent = String(sessions.length);
-  const rendered = sessions.slice(0, 4).map((s, i) => {
-    const burn = Number(s.burn_rate_usd_per_hour || 0);
-    const burnTxt = burn > 0 ? `$${burn.toFixed(2)}/h` : '—';
-    const age = s.last_activity ? fmtAgo((Date.now() - new Date(s.last_activity).getTime()) / 1000) : 'live';
-    const rowCls = i === 0 ? 'live-row primary' : 'live-row';
-    const pathAttr = s.path ? ` data-path="${escapeAttr(s.path)}"` : '';
-    return `<div class="${rowCls}"${pathAttr} title="${escapeAttr(s.path || s.project || '')} · click to open">
-      <div class="live-row-main">
-        <span class="live-proj">${escape(shortProject(s.project))}</span>
-        <span class="live-cost">$${Number(s.cost_today || 0).toFixed(2)}</span>
-      </div>
-      <div class="live-row-meta">
-        <span>${escape(shortModel(s.model))}</span>
-        <span>${Number(s.messages_today || 0).toLocaleString()} msgs</span>
-        <span>${burnTxt}</span>
-        <span>${escape(age)}</span>
-      </div>
-    </div>`;
-  }).join('');
-  const overflow = sessions.length > 4
-    ? `<div class="live-row overflow">+${sessions.length - 4} more live session${sessions.length - 4 === 1 ? '' : 's'}</div>`
-    : '';
-  list.innerHTML = rendered + overflow;
+  // Lead session → Now burning card.
+  const lead = sessions[0];
+  if (card) {
+    card.hidden = false;
+    const burn = Number(lead.burn_rate_usd_per_hour || 0);
+    const age = lead.last_activity ? fmtAgo((Date.now() - new Date(lead.last_activity).getTime()) / 1000) : 'live';
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('ncProj', shortProject(lead.project));
+    set('ncCost', '$' + Number(lead.cost_today || 0).toFixed(2));
+    set('ncMeta', `${shortModel(lead.model)} · ${Number(lead.messages_today || 0).toLocaleString()} msg`);
+    set('ncBurn', burn > 0 ? `↑ $${burn.toFixed(2)}/h` : '');
+    set('ncAgo', age);
+    const projEl = document.getElementById('ncProj');
+    if (projEl) {
+      projEl.dataset.path = lead.path || '';
+      projEl.title = (lead.path || lead.project || '') + ' · click to open';
+    }
+  }
+
+  // Remaining sessions → "Other live" rows inside Details.
+  const rest = sessions.slice(1);
+  if (otherWrap) otherWrap.hidden = rest.length === 0;
+  if (list) {
+    const rows = rest.slice(0, 4).map((s) => {
+      const burn = Number(s.burn_rate_usd_per_hour || 0);
+      const burnTxt = burn > 0 ? `$${burn.toFixed(2)}/h` : '—';
+      const age = s.last_activity ? fmtAgo((Date.now() - new Date(s.last_activity).getTime()) / 1000) : 'live';
+      const pathAttr = s.path ? ` data-path="${escapeAttr(s.path)}"` : '';
+      return `<div class="lrow"${pathAttr} title="${escapeAttr(s.path || s.project || '')} · click to open">
+        <span class="proj"><span class="pip"></span><span class="nm">${escape(shortProject(s.project))}</span></span>
+        <span class="cost">$${Number(s.cost_today || 0).toFixed(2)}</span>
+        <span class="sub">${escape(shortModel(s.model))} · ${Number(s.messages_today || 0).toLocaleString()} msg · ${burnTxt}</span>
+        <span class="ago">${escape(age)}</span>
+      </div>`;
+    }).join('');
+    const overflow = rest.length > 4
+      ? `<button class="lrow more">+${rest.length - 4} more session${rest.length - 4 === 1 ? '' : 's'}</button>`
+      : '';
+    list.innerHTML = rows + overflow;
+  }
 }
 
 function totalsFromPayload(d) {
@@ -284,7 +303,20 @@ function renderImpactStrip(d) {
     projected = Number(insights.projected_today_cost || 0) || (cost + Number(active.burn_rate_usd_per_hour || 0) * Math.max(0, (end - now) / 3600000));
   }
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  set('iProjected', cost > 0 ? fmtMoney(projected) : '—');
+  // Hero "projected" signal — warn-styled when projected spend exceeds the
+  // daily budget. Only meaningful for "today"; cleared in range views.
+  const iProj = document.getElementById('iProjected');
+  if (iProj) {
+    const isToday = !!d.today || !window.__suprbar_range || window.__suprbar_range === 'today';
+    if (cost > 0 && isToday) {
+      iProj.innerHTML = '<span class="arrow">▲</span> projected ' + escape(fmtMoney(projected));
+      const limit = Number(prefsCache?.budgets?.daily_limit || 0);
+      iProj.classList.toggle('warn', limit > 0 && projected > limit);
+    } else {
+      iProj.textContent = '';
+      iProj.classList.remove('warn');
+    }
+  }
   set('iAvgMsg', messages > 0 ? fmtMoney(Number(insights.cost_per_message || 0) || cost / messages, 3) : '—');
   set('iSaved', Number(insights.cache_savings_usd || t.cache_savings_usd || 0) > 0 ? fmtMoney(insights.cache_savings_usd || t.cache_savings_usd) : '—');
   const share = Number(insights.top_project_share || 0);
@@ -338,6 +370,8 @@ function renderProjectList(d) {
   const list = document.getElementById('projectsListItems');
   if (!list) return;
   const rows = projectRowsFromPayload(d).slice(0, getTopN());
+  const countEl = document.getElementById('projectsListCount');
+  if (countEl) countEl.textContent = rows.length ? String(rows.length) : '';
   if (!rows.length) {
     list.innerHTML = '';
     return;
@@ -483,11 +517,7 @@ function render(d) {
     if (live) {
       live.hidden = false;
       live.classList.remove('dim');
-      if (nLive > 1) {
-        live.innerHTML = `<span class="pulse-dot"></span>${nLive} live`;
-      } else {
-        live.innerHTML = '<span class="pulse-dot"></span>session live';
-      }
+      live.innerHTML = `<span class="pip"></span> <span id="liveCount">${Math.max(1, nLive)}</span> live`;
     }
     const mr = $('metricRow'); if (mr) mr.hidden = false;
     const es = $('emptyState'); if (es) es.hidden = true;
@@ -507,7 +537,7 @@ function render(d) {
     if (live) {
       live.hidden = false;
       live.classList.add('dim');
-      live.textContent = 'idle';
+      live.innerHTML = '<span class="pip"></span> idle';
     }
     const mr = $('metricRow'); if (mr) mr.hidden = true;
     const es = $('emptyState'); if (es) es.hidden = false;
@@ -761,7 +791,7 @@ $('refreshBtn')?.addEventListener('click', triggerRefresh);
 
 // Drop heavy effects while the native window is being dragged.
 function bindWindowDragPerf() {
-  const dragSel = '.flyout-head, .cost-eyebrow, .settings-head';
+  const dragSel = '.b-head, .cost-eyebrow, .settings-head';
   const onDown = (e) => {
     if (e.button !== 0) return;
     if (e.target.closest('button, input, select, textarea, a, [role="button"]')) return;
@@ -1022,12 +1052,12 @@ function openCtxMenu(x, y) {
   _ctxMenu = m;
   m.style.cssText = [
     'position:fixed', `left:${x}px`, `top:${y}px`,
-    'background:rgba(28,30,38,0.98)',
-    'border:1px solid rgba(255,255,255,0.1)',
-    'border-radius:6px', 'padding:4px',
-    'box-shadow:0 8px 24px rgba(0,0,0,0.5)',
-    'font-family:Geist Mono,ui-monospace,monospace', 'font-size:11px',
-    'color:#f4f5f7', 'min-width:130px', 'z-index:9998',
+    'background:var(--b-elevated)',
+    'border:1px solid var(--b-line-2)',
+    'border-radius:var(--r-2)', 'padding:var(--sp-1,4px)',
+    'box-shadow:var(--b-shadow)',
+    'font-family:var(--b-mono)', 'font-size:var(--fs-11)',
+    'color:var(--b-text)', 'min-width:160px', 'z-index:9998',
   ].join(';');
   const pinned = $('pinBtn')?.classList.contains('on');
   const items = [
@@ -1047,8 +1077,8 @@ function openCtxMenu(x, y) {
       'padding:6px 10px', 'font:inherit', 'cursor:pointer',
       'border-radius:4px',
     ].join(';');
-    b.addEventListener('mouseenter', () => b.style.background = 'rgba(255,255,255,0.07)');
-    b.addEventListener('mouseleave', () => b.style.background = 'transparent');
+    b.addEventListener('mouseenter', () => { b.style.background = 'var(--b-accent-soft)'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; });
     b.addEventListener('click', (e) => { e.stopPropagation(); closeCtxMenu(); it.fn(); });
     m.appendChild(b);
   });
@@ -1247,9 +1277,16 @@ window.addEventListener('hashchange', () => {
 setTimeout(maybeOpenSettingsFromNav, 120);
 
 document.getElementById('liveSessionList')?.addEventListener('click', (e) => {
-  const row = e.target.closest('.live-row[data-path]');
+  const row = e.target.closest('.lrow[data-path]');
   if (!row?.dataset.path) return;
   openPath(row.dataset.path);
+  toast('opening session…', 'ok', 1200);
+});
+// Now-burning card project name → open the session file.
+document.getElementById('ncProj')?.addEventListener('click', () => {
+  const p = document.getElementById('ncProj')?.dataset.path;
+  if (!p) return;
+  openPath(p);
   toast('opening session…', 'ok', 1200);
 });
 
@@ -1570,19 +1607,39 @@ function renderBudget(b) {
   if (!active) { strip.hidden = true; return; }
   strip.hidden = false;
   const fill = document.getElementById('bsFill');
-  const pct  = document.getElementById('bsPct');
-  if (!fill || !pct) return;
+  if (!fill) return;
   const pctVal = Math.min(100, Math.max(0, active.pct));
   fill.style.width = pctVal.toFixed(1) + '%';
   fill.classList.remove('warn', 'over');
   if (active.pct >= 100) fill.classList.add('over');
   else if (active.alerting) fill.classList.add('warn');
-  pct.textContent = active.pct >= 1000 ? '>999%' : active.pct.toFixed(0) + '%';
-  pct.title = `${active.key}: $${active.spent.toFixed(2)} / $${active.limit.toFixed(2)}`;
+  const pct = document.getElementById('bsPct');
+  if (pct) {
+    pct.textContent = active.pct >= 1000 ? '>999%' : active.pct.toFixed(0) + '%';
+    pct.title = `${active.key}: $${active.spent.toFixed(2)} / $${active.limit.toFixed(2)}`;
+  }
+  // Window label + "$spent / $limit" amount.
+  const lblEl = strip.querySelector('.fuel-top .lbl');
+  if (lblEl) lblEl.textContent = active.key.charAt(0).toUpperCase() + active.key.slice(1) + ' budget';
+  const amt = document.getElementById('bsAmt');
+  if (amt) amt.innerHTML = `${escape(fmtMoney(active.spent))} <span class="lim">/ ${escape(fmtMoney(active.limit))}</span>`;
   const remain = document.getElementById('bsRemain');
   if (remain) {
     const left = Math.max(0, active.limit - active.spent);
-    remain.textContent = left > 0 ? `${fmtMoney(left)} left` : 'over';
+    remain.textContent = left > 0 ? `${fmtMoney(left)} left` : 'over budget';
+  }
+  // "on pace to go over by $X" — derived from today's projected spend vs the
+  // daily limit. Needs no new data; both numbers already loaded.
+  const pace = document.getElementById('bsPace');
+  const sep = document.getElementById('bsSep');
+  if (pace) {
+    let paceTxt = '';
+    if (active.key === 'daily') {
+      const projected = Number(lastData?.insights?.projected_today_cost || 0);
+      if (projected > active.limit) paceTxt = `on pace to go over by ${fmtMoney(projected - active.limit)}`;
+    }
+    pace.textContent = paceTxt;
+    if (sep) sep.hidden = !paceTxt;
   }
   maybeNotifyBudget(active);
 }
@@ -1626,8 +1683,8 @@ function applyDisplayPrefs(prefs) {
   body.dataset.theme = (d.theme === 'light') ? 'light' :
                        (d.theme === 'auto')  ? (matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
                                              : '';
-  // accent
-  body.dataset.accent = d.accent || 'violet';
+  // accent (default = refined indigo, the redesign default)
+  body.dataset.accent = d.accent || 'blue';
   // density
   body.classList.toggle('compact',  d.density === 'compact');
   body.classList.toggle('spacious', d.density === 'spacious');
@@ -1640,7 +1697,7 @@ function applyDisplayPrefs(prefs) {
 
   // visibility of each metric tile / chip
   const setHidden = (sel, hide) => document.querySelectorAll(sel).forEach(e => e.hidden = !!hide);
-  setHidden('.token-bar, .token-legend', d.show_token_bar === false);
+  setHidden('.tok-bar, .tok-legend', d.show_token_bar === false);
   setHidden('#cacheHit', d.show_cache_info === false);
   setHidden('#mBurnCell, #mBurn', d.show_burn_rate === false);
   setHidden('#mModelCell', d.show_model === false);
