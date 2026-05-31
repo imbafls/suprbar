@@ -232,7 +232,7 @@ def _compute_cache_savings(sources_data: list[dict[str, Any]],
     if total_cache_read <= 0:
         return 0.0
     # Late import to dodge circular reference at module load time.
-    from .pricing import cache_savings_for, PRICING
+    from .pricing import cache_savings_over_models
 
     # Prefer per-model breakdown from the local source.
     by_model: list[dict[str, Any]] = []
@@ -241,18 +241,14 @@ def _compute_cache_savings(sources_data: list[dict[str, Any]],
             by_model = list(s.get("extras", {}).get("by_model", []) or [])
             break
 
-    saved = 0.0
+    pairs: list[tuple[float, str]] = []
     attributed = 0
     for m in by_model:
         cr = int(m.get("cache_read", 0) or 0)
         if cr <= 0:
             continue
-        saved += cache_savings_for(
-            {"cache_read_input_tokens": cr}, m.get("model", ""))
+        pairs.append((cr, m.get("model", "")))
         attributed += cr
 
     leftover = max(0, total_cache_read - attributed)
-    if leftover:
-        rate = PRICING["opus"]["input"]
-        saved += (leftover * rate * 0.9) / 1_000_000
-    return saved
+    return cache_savings_over_models(pairs, leftover)

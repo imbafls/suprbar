@@ -15,7 +15,7 @@ import time
 import pystray
 from PIL import Image, ImageDraw, ImageFont
 
-from . import config, server
+from . import config, server, updater
 from . import __version__
 from .popup import TrayBridge
 
@@ -275,6 +275,35 @@ class TrayApp:
         except Exception:
             log.exception("notify failed")
 
+    # ---- update menu callbacks ----
+
+    def _update_available(self) -> bool:
+        st = updater.cached_status()
+        return bool(st and st.get("available"))
+
+    def _update_item_text(self, item) -> str:
+        st = updater.cached_status() or {}
+        return f"Update to v{st.get('latest')}…" if st.get("available") else "Update"
+
+    def _on_check_updates(self, icon, item):
+        def _bg():
+            st = updater.check_for_update()
+            try:
+                if self._icon:
+                    self._icon.update_menu()
+                    self._icon.notify(
+                        "supr.bar",
+                        f"Update available: v{st.get('latest')}" if st.get("available")
+                        else "You're on the latest version.")
+            except Exception:
+                pass
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _on_apply_update(self, icon, item):
+        # Same path the flyout button uses; updater quits the app when done.
+        threading.Thread(
+            target=updater.download_and_apply, daemon=True).start()
+
     def _on_quit(self, icon, item):
         self._stop.set()
         try:
@@ -445,6 +474,9 @@ class TrayApp:
         menu = pystray.Menu(
             pystray.MenuItem("Open supr.bar", self._on_default, default=True),
             pystray.MenuItem("Refresh now", self._on_refresh),
+            pystray.MenuItem("Check for updates", self._on_check_updates),
+            pystray.MenuItem(self._update_item_text, self._on_apply_update,
+                             visible=lambda item: self._update_available()),
             pystray.MenuItem("30-day report…", self._on_report),
             pystray.MenuItem("Pin (don't auto-hide)", self._on_pin_toggle,
                              checked=self._is_pinned),
@@ -496,4 +528,23 @@ class TrayApp:
 
         threading.Thread(target=self._refresh_loop, daemon=True,
                          name="suprbar-refresh").start()
+
+        # Once-per-launch update check (background, non-blocking, opt-out).
+        if config.get_pref("updates.check_on_launch", True) and updater.is_updatable():
+            def _bg_update_check():
+                try:
+                    st = updater.check_for_update()
+                    if st.get("available") and self._icon:
+                        try:
+                            self._icon.notify(
+                                "supr.bar update available",
+                                f"v{st.get('latest')} — open supr.bar to update")
+                        except Exception:
+                            pass
+                        self._icon.update_menu()   # surface the "Update to vX" item
+                except Exception:
+                    log.debug("background update check failed", exc_info=True)
+            threading.Thread(target=_bg_update_check, daemon=True,
+                             name="suprbar-update-check").start()
+
         self._icon.run()

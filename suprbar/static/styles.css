@@ -523,6 +523,30 @@ body.loading .cost-num {
 .conn .cretry, .conn-banner .btn-sm { font-size: var(--fs-10); font-weight: 600; color: var(--b-text); background: var(--b-surface-3); padding: 3px var(--sp-3); border-radius: var(--r-1); border: 1px solid var(--b-line-2); }
 .conn .cretry:hover { background: var(--b-surface-2); }
 
+/* ====================  UPDATE BANNER  =============================== */
+.updbar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin: 0 var(--pad); padding: var(--sp-2) var(--sp-3);
+  background: var(--b-accent-ghost);
+  border: 1px solid var(--b-accent-line);
+  border-radius: var(--r-2); font-size: var(--fs-11);
+  color: var(--b-text); flex: none;
+}
+.updbar .upip { width: 7px; height: 7px; border-radius: 50%;
+  background: var(--b-accent-hot); animation: pulse-d 1.6s var(--ease) infinite; }
+.updbar .utext { flex: 1; }
+.updbar .utext b { font-family: var(--b-mono); color: var(--b-accent-hot); }
+.updbar .ubtn { font-size: var(--fs-10); font-weight: 600; padding: 3px var(--sp-3);
+  border-radius: var(--r-1); border: 1px solid var(--b-line-2);
+  background: var(--b-surface-3); color: var(--b-text); cursor: pointer; }
+.updbar .ubtn.primary { background: var(--b-accent); border-color: transparent;
+  color: var(--b-on-accent); }
+.updbar .ubtn.primary:hover { background: var(--b-accent-hot); }
+.updbar .ubtn.ghost { background: none; border: 0; color: var(--b-dimmer);
+  padding: 3px 6px; }
+.updbar .ubtn.ghost:hover { color: var(--b-text); }
+.updbar.updating .ubtn.primary { opacity: .6; pointer-events: none; }
+
 /* ====================  SOURCE CARDS (multi-source)  ================== */
 .sources, .source-cards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
 .scard, .source-card {

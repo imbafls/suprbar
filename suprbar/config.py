@@ -89,6 +89,13 @@ DEFAULTS: dict[str, Any] = {
         "tray_warn_color": True,       # tint tray icon amber/red on warning
     },
 
+    # ---- Updates ----
+    "updates": {
+        "check_on_launch": True,       # background version check at startup
+        "last_check":      "",         # ISO-8601 of last check ("" = never)
+        "skip_version":    "",         # release the user chose to skip ("" = none)
+    },
+
     # ---- Behavior ----
     "behavior": {
         "refresh_seconds":       5,    # 0=manual, else auto-refresh cadence (s)
@@ -388,6 +395,11 @@ SCHEMA: dict[str, tuple[str, Any]] = {
 
     # data
     "data.log_level":          ("enum", ("OFF", "ERROR", "WARN", "INFO", "DEBUG")),
+
+    # updates
+    "updates.check_on_launch": ("bool", None),
+    "updates.last_check":      ("str", None),
+    "updates.skip_version":    ("str", None),
 
     # window
     "window.width":             ("int", (260, 800)),

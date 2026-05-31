@@ -1,29 +1,49 @@
 # supr.bar CHANGELOG
 
-## v0.9.2 — report XSS hardening
+## v0.10.0 — in-app auto-update
 
-- **Fix:** escape the by-project model label (`p.model`) before inserting it
-  into the report DOM. `_model_family()` passes raw model ids through for any
-  model that isn't opus/sonnet/haiku, so a crafted local `~/.claude` transcript
-  `message.model` could execute under `/report`'s inline-script CSP. Completes
-  the output-escaping introduced in v0.9.0 (every other disk-derived string was
-  already escaped). Caught by automated PR review.
+supr.bar can now update itself. No more checking Releases by hand — when a new
+build ships, the flyout tells you, and one click pulls it down and installs it.
 
-## v0.9.1 — installer version fix
+### Checks for new releases
+- **Once per launch**, in the background, supr.bar asks GitHub for the latest
+  release and — if it's newer than what you're running — surfaces it. You can
+  also check **on demand**: the **Updates** action in the flyout footer, **Check
+  now** in About, or **Check for updates** in the tray menu.
+- When an update is found you get an **accent-toned banner** in the flyout
+  (*"Update available — v0.10.0"* with **Update** / dismiss), a tray
+  notification, and a dynamic tray item **"Update to vX…"**. Dismissing a
+  version hides the banner for that version only.
 
-- **Fix:** the v0.9.0 installer asset was mislabeled `suprbar-setup-0.8.0.exe`
-  (with 0.8.0 version metadata) because `installer.iss` hardcoded the version as
-  a separate source of truth. The build now injects the version — from the git
-  tag in CI and from `suprbar.__version__` for local builds — with the
-  `installer.iss` literal demoted to a fallback, so the installer name and
-  metadata always track the release. The app itself and the portable zip were
-  already correct in v0.9.0; this only affects the installer's label/metadata.
+### One-click install
+- **Update** downloads the installer asset straight from the GitHub release,
+  validates it, launches it silently, and restarts into the new version — no
+  manual download, unzip, or re-run.
+- The download is hardened: HTTPS-only with a host allowlist (re-checked after
+  the GitHub redirect), an installer-name allowlist
+  (`suprbar-setup-X.Y.Z.exe`), SHA-256 verification against the release asset's
+  digest (exact-size fallback), and a size ceiling. Any failure aborts cleanly
+  and leaves your install untouched — it never half-applies.
 
-## v0.9.0 — 30-day usage report export
+### Local-first and honest
+- **No telemetry.** The only network call is an **unauthenticated `GET`** for
+  the latest-release version — no account, no token, nothing about you is sent
+  (just a `suprbar/<version>` User-Agent). Everything else stays on your machine.
+- **Opt out** anytime: turn off **Settings → Updates → Check on launch**
+  (`updates.check_on_launch`) and supr.bar never reaches out on its own; manual
+  checks still work.
+- **Not code-signed (yet).** This build isn't code-signed, so Windows
+  **SmartScreen may warn** when the installer runs. That's expected — choose
+  **More info → Run anyway**. Running from a source checkout never auto-updates
+  (update via `git` instead).
+
+## v0.9.2 — 30-day usage report export
 
 A new **HTML-based usage report** — a beautiful, self-contained, printable
 spend report covering the last 30 days, built from the same local `~/.claude`
-scan that drives the flyout. Integrated from a Claude Design handoff.
+scan that drives the flyout. Integrated from a Claude Design handoff. (This is
+the first published build of the report — the v0.9.0 release was deleted; the
+installer-label and report-XSS fixes below are folded in here.)
 
 ### The report
 - Open it from the tray menu (**"30-day report…"**) or the flyout **Report**
@@ -54,6 +74,21 @@ scan that drives the flyout. Integrated from a Claude Design handoff.
 - Disk-derived strings (project names, model ids) are HTML-escaped and the
   injected JSON is `</`-escaped, so the report stays safe under its scoped
   inline-script CSP.
+
+### Fixes folded in
+- **Installer label/metadata now tracks the release.** The first installer asset
+  was mislabeled `suprbar-setup-0.8.0.exe` (with 0.8.0 metadata) because
+  `installer.iss` hardcoded the version as a separate source of truth. The build
+  now injects the version — from the git tag in CI and from `suprbar.__version__`
+  for local builds — with the `installer.iss` literal demoted to a fallback, so
+  the installer name and metadata always track the release. The app and portable
+  zip were already correct; this only affected the installer's label/metadata.
+- **Report XSS hardening.** Escape the by-project model label (`p.model`) before
+  inserting it into the report DOM. `_model_family()` passes raw model ids
+  through for any model that isn't opus/sonnet/haiku, so a crafted local
+  `~/.claude` transcript `message.model` could execute under `/report`'s
+  inline-script CSP. Completes the output-escaping above (every other
+  disk-derived string was already escaped). Caught by automated PR review.
 
 ## v0.8.0 — glance-first redesign
 

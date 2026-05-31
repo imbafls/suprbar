@@ -129,6 +129,76 @@ function setConnBanner(show, text) {
   if (t && text) t.textContent = text;
 }
 
+// ───────────────────────── Update banner (auto-update) ─────────────────────────
+
+let _updateInfo = null;
+function setUpdateBanner(info) {
+  const b = document.getElementById('updateBanner');
+  if (!b) return;
+  _updateInfo = info || null;
+  const ver = info?.latest;
+  if (!info?.available) { b.hidden = true; return; }
+  if (localStorage.getItem('suprbar.update.dismissed') === ver) { b.hidden = true; return; }
+  const v = document.getElementById('updateVersion');
+  if (v) v.textContent = 'v' + ver;
+  const t = document.getElementById('updateBannerText');
+  if (t && t.firstChild) t.firstChild.textContent =
+    `Update available — v${info.current || appMeta?.version || '?'} → `;
+  b.hidden = false;
+}
+
+function _fmtCheckedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString();
+}
+
+function setUpdateAboutStatus(info) {
+  // Read-only About line: surfaces availability / errors and the last-check
+  // timestamp (updates.last_check, persisted server-side; shown here only).
+  const about = document.getElementById('updateAboutStatus');
+  if (!about || !info) return;
+  const when = _fmtCheckedAt(info.checked_at);
+  if (info.error) {
+    about.textContent = `Check failed (${info.error}).` + (when ? ` Last tried ${when}.` : '');
+  } else if (info.available) {
+    about.textContent = `New version v${info.latest} available.`;
+  } else if (info.latest || when) {
+    about.textContent = "You're on the latest version."
+      + (when ? ` Last checked ${when}.` : '');
+  } else {
+    about.textContent = 'No update check yet.';
+  }
+}
+
+async function loadUpdateStatus() {
+  // Read cached status (no network) on boot — banner shows if the once-per-
+  // launch check (server-side, fired by the tray) already found one.
+  try {
+    const r = await fetch('/api/update/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    const info = await r.json();
+    setUpdateBanner(info);
+    setUpdateAboutStatus(info);
+  } catch (_) { /* ignore */ }
+}
+
+async function checkForUpdates({ manual = false } = {}) {
+  try {
+    const r = await fetch('/api/update/check', { method: 'POST' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const info = await r.json();
+    setUpdateBanner(info);
+    setUpdateAboutStatus(info);
+    if (manual && !info.available && !info.error) toast('up to date', 'ok', 1400);
+    if (manual && info.error) toast('update check failed', 'err');
+    return info;
+  } catch (_) {
+    if (manual) toast('update check failed', 'err');
+  }
+}
+
 function getTopN() {
   const n = Number(prefsCache?.projects?.top_n);
   return Number.isFinite(n) && n > 0 ? Math.min(24, Math.floor(n)) : 8;
@@ -1268,6 +1338,7 @@ document.body.classList.add('loading');                // matches CSS skeleton, 
 load({ refresh: true });
 loadConfig();
 loadVersion();
+loadUpdateStatus();
 loadPrefs();
 setPollInterval(POLL_MS_ACTIVE);
 setInterval(updateStartedDisplay, 1000);
@@ -1304,6 +1375,28 @@ document.getElementById('reportBtn')?.addEventListener('click', async () => {
     toast('could not open report', 'err');
   }
 });
+document.getElementById('updateApplyBtn')?.addEventListener('click', async () => {
+  const b = document.getElementById('updateBanner');
+  b?.classList.add('updating');
+  toast('downloading update…', 'ok', 1500);
+  try {
+    const r = await fetch('/api/update/apply', { method: 'POST' }).then(r => r.json());
+    toast(r.ok ? (r.message || 'update starting — restarting…') : (r.error || 'update failed'),
+          r.ok ? 'ok' : 'err', r.ok ? 4000 : 3200);
+  } catch (_) {
+    toast('update failed', 'err');
+  } finally {
+    b?.classList.remove('updating');
+  }
+});
+document.getElementById('updateDismissBtn')?.addEventListener('click', () => {
+  if (_updateInfo?.latest) localStorage.setItem('suprbar.update.dismissed', _updateInfo.latest);
+  const b = document.getElementById('updateBanner'); if (b) b.hidden = true;
+});
+document.getElementById('checkUpdateBtn')?.addEventListener('click',
+  () => { toast('checking…', 'ok', 800); checkForUpdates({ manual: true }); });
+document.getElementById('checkUpdateBtn2')?.addEventListener('click',
+  () => { toast('checking…', 'ok', 800); checkForUpdates({ manual: true }); });
 document.getElementById('copyPathBtn')?.addEventListener('click', async () => {
   const path = lastData?.scan_source || '~/.claude/projects';
   try {
@@ -1356,10 +1449,20 @@ const SECTION_TITLES = {
   data:     'Data & privacy',
   window:   'Window',
   ui:       'Tray & startup',
+  updates:  'Updates',
 };
 
 const SECTION_ORDER = ['display','budgets','behavior','ui','range','projects',
-                       'sources','window','data'];
+                       'sources','window','data','updates'];
+
+// Internal update state — persisted in config (needed by set_many) but NOT
+// user-facing settings. These never render as editable rows: updates.last_check
+// is shown read-only in About; updates.skip_version is purely internal. Only
+// updates.check_on_launch is an interactive control.
+const INTERNAL_PREF_KEYS = new Set([
+  'updates.last_check',
+  'updates.skip_version',
+]);
 
 const SECTION_DEFAULT_OPEN = new Set(['display', 'budgets', 'behavior', 'ui']);
 
@@ -1424,6 +1527,9 @@ const LABELS = {
   // ui
   'ui.pinned':         { label: 'Pinned',           desc: 'Popup does not auto-hide.' },
   'ui.start_on_login': { label: 'Start on Windows sign-in', desc: 'Auto-launch when you log in.' },
+  // updates (only check_on_launch is user-facing; last_check / skip_version are
+  // internal — see INTERNAL_PREF_KEYS — and never render as editable rows)
+  'updates.check_on_launch': { label: 'Check on launch', desc: 'Look for a new release at startup.' },
 };
 
 // ──── Range tab handlers ────
@@ -1935,6 +2041,11 @@ function buildControl(setting, value) {
 function settingsBySection() {
   const bySection = {};
   for (const s of schemaCache || []) {
+    // R1: internal update state (last_check / skip_version) stays in config
+    // but is never an editable settings row. Filtering here — the single choke
+    // point feeding renderSettings, nav counts, and search — keeps the Updates
+    // section showing only its check_on_launch toggle.
+    if (INTERNAL_PREF_KEYS.has(s.path)) continue;
     const section = s.path.split('.')[0];
     (bySection[section] ||= []).push(s);
   }

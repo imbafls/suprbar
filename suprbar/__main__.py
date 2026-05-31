@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 
-from . import config, server
+from . import config, server, updater
 from .popup import (
     TrayBridge,
     acquire_single_instance,
@@ -101,6 +101,7 @@ def main() -> int:
             pass
 
     server.set_quit_callback(shutdown_app)
+    updater.set_quit_fn(shutdown_app)
 
     # Signal handling. SIGINT works on all platforms; SIGTERM only off-Windows.
     try:

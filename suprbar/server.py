@@ -23,6 +23,9 @@ Routes:
   GET  /report[.html]               30-day usage report page (relaxed CSP)
   GET  /api/report                  30-day report payload (JSON)
   POST /api/open-report             open the report in the default browser
+  GET  /api/update/status           cached update status (no network)
+  POST /api/update/check            re-check GitHub for a new release
+  POST /api/update/apply            download + launch installer, then quit
 """
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, aggregator, config, report, scanner
+from . import __version__, aggregator, config, report, scanner, updater
 from .providers import anthropic_api as p_anthropic_api
 from .providers import local as p_local
 
@@ -215,10 +218,10 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- output helpers ----
 
-    def _send_common_headers(self) -> None:
+    def _send_common_headers(self, csp: str | None = None) -> None:
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", _csp_header())
+        self.send_header("Content-Security-Policy", csp or _csp_header())
 
     def _maybe_gzip(self, body: bytes) -> tuple[bytes, str | None]:
         ae = (self.headers.get("Accept-Encoding") or "").lower()
@@ -233,6 +236,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype: str,
         *,
         extra_headers: dict[str, str] | None = None,
+        csp: str | None = None,
     ) -> None:
         encoded, ce = self._maybe_gzip(body)
         self.send_response(code)
@@ -241,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
         if ce:
             self.send_header("Content-Encoding", ce)
             self.send_header("Vary", "Accept-Encoding")
-        self._send_common_headers()
+        self._send_common_headers(csp)
         if extra_headers:
             for k, v in extra_headers.items():
                 self.send_header(k, v)
@@ -272,34 +276,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error(404, "not_found", "static file not found")
         return self._send(200, p.read_bytes(), ctype)
 
-    def _send_html_with_csp(self, code: int, body: bytes, csp: str) -> None:
-        """Send an HTML document with an explicit CSP override.
-
-        Mirrors _send() (gzip + BrokenPipe guards) but writes headers manually
-        so this route can relax the CSP without touching _send_common_headers().
-        """
-        encoded, ce = self._maybe_gzip(body)
-        self.send_response(code)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        if ce:
-            self.send_header("Content-Encoding", ce)
-            self.send_header("Vary", "Accept-Encoding")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", csp)
-        self.end_headers()
-        try:
-            self.wfile.write(encoded)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-            # Client (WebView2 page navigation, F5, shutdown) closed mid-write.
-            pass
-
     def _serve_report(self):
         """Render static/report.html with the report JSON substituted in.
 
-        Served with a relaxed CSP (inline script allowed) — see
-        _report_csp_header(). This route does NOT go through _send().
+        Served with a relaxed CSP (inline script allowed) via _send()'s ``csp``
+        override — see _report_csp_header().
         """
         template_path = STATIC_DIR / "report.html"
         if not template_path.exists():
@@ -316,7 +297,8 @@ class Handler(BaseHTTPRequestHandler):
         # relaxed inline-script CSP has no attacker-reachable script path.
         payload = json.dumps(data).replace("</", "<\\/")
         html = template.replace("__SUPRBAR_REPORT_JSON__", payload)
-        return self._send_html_with_csp(200, html.encode("utf-8"), _report_csp_header())
+        return self._send(200, html.encode("utf-8"),
+                          "text/html; charset=utf-8", csp=_report_csp_header())
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
@@ -327,6 +309,30 @@ class Handler(BaseHTTPRequestHandler):
             return json.loads(data)
         except (ValueError, UnicodeDecodeError):
             return {}
+
+    def _origin_allowed(self) -> bool:
+        """CSRF guard for state-changing POSTs.
+
+        The flyout + report are served same-origin from 127.0.0.1, so legitimate
+        requests are same-origin; a malicious web page the user visits in any
+        browser hitting our localhost port is cross-site. We reject when the
+        browser tells us the request is cross-site (``Sec-Fetch-Site``) or when
+        an ``Origin`` is present whose host isn't loopback. Non-browser clients
+        send neither header and are allowed — a local process can act directly
+        anyway, so CSRF protection only needs to stop browser-driven requests.
+        """
+        sfs = self.headers.get("Sec-Fetch-Site")
+        if sfs is not None and sfs not in ("same-origin", "none"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin:
+            try:
+                host = urlparse(origin).hostname
+            except ValueError:
+                return False
+            if host not in ("127.0.0.1", "localhost", "::1"):
+                return False
+        return True
 
     # ---- routes ----
 
@@ -362,6 +368,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/diagnostics":
             return self._send_json(200, _diagnostics_payload())
+
+        if path == "/api/update/status":
+            return self._send_json(200, _update_status_payload())
 
         if path == "/api/today":
             if "refresh" in qs:
@@ -410,6 +419,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        # CSRF: reject browser cross-origin POSTs before any mutating route runs.
+        # Matters most for /api/update/apply (download+install+quit) and /api/quit.
+        if not self._origin_allowed():
+            return self._send_error(403, "forbidden", "cross-origin request rejected")
 
         if path == "/api/config":
             body = self._read_json_body()
@@ -474,6 +488,31 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/open-report":
             return self._send_json(200, {"opened": open_report_in_browser()})
+
+        if path == "/api/update/check":
+            # Synchronous re-check (manual). Bounded by retry budget (~few s).
+            st = updater.check_for_update()
+            return self._send_json(200,
+                {k: v for k, v in st.items() if not k.startswith("_")})
+
+        if path == "/api/update/apply":
+            if not updater.is_updatable():
+                return self._send_error(
+                    409, "not_frozen",
+                    "auto-update is only available in the installed build")
+            st = updater.cached_status()
+            if not st or not st.get("available"):
+                return self._send_error(409, "no_update", "no update available")
+            self._send_json(200, {"ok": True, "message": "update starting…"})
+            # Reuse the quit hook: download_and_apply launches the installer then
+            # calls _trigger_quit via the registered quit_fn. Worker thread so the
+            # response flushes first (same pattern as /api/quit).
+            threading.Thread(
+                target=updater.download_and_apply,
+                kwargs={"quit_fn": _trigger_quit},
+                daemon=True,
+            ).start()
+            return
 
         if path == "/api/quit":
             self._send_json(200, {"ok": True})
@@ -580,6 +619,16 @@ def _diagnostics_payload() -> dict:
             "ttl_seconds": _TODAY_TTL,
         },
     }
+
+
+def _update_status_payload() -> dict:
+    """Public update status — strips internal underscore-prefixed keys."""
+    st = updater.cached_status()
+    if st is None:
+        st = {"current": __version__, "latest": None, "available": False,
+              "asset_name": None, "asset_url": None, "size": None,
+              "notes_url": None, "error": None, "checked_at": None}
+    return {k: v for k, v in st.items() if not k.startswith("_")}
 
 
 def _public_config() -> dict:

@@ -191,6 +191,30 @@ def cache_savings_for(usage: dict[str, Any], model: str = "") -> float:
     return (cr * rate["input"] * 0.9) / 1_000_000
 
 
+def cache_savings_over_models(
+    per_model: list[tuple[float, str]],
+    leftover_cache_read: float = 0.0,
+) -> float:
+    """Sum cache-read savings across a per-model cache_read breakdown.
+
+    ``per_model`` is a list of ``(cache_read_tokens, model_id)`` pairs; each is
+    charged at that model's own input rate via ``cache_savings_for``. Any
+    cache_read not attributable to a model (``leftover_cache_read``) is charged
+    at the opus rate as a conservative upper bound. Shared by
+    ``aggregator._compute_cache_savings`` (real per-model cache_read) and
+    ``report._cache_savings`` (cache_read prorated across models by tokens).
+    """
+    saved = 0.0
+    for cr, model in per_model:
+        if cr <= 0:
+            continue
+        saved += cache_savings_for({"cache_read_input_tokens": cr}, model)
+    if leftover_cache_read > 0:
+        rate = PRICING["opus"]["input"]
+        saved += (leftover_cache_read * rate * 0.9) / 1_000_000
+    return saved
+
+
 # ---------------------------------------------------------------- self-test ----
 
 if __name__ == "__main__":

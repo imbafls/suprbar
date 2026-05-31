@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from . import __version__, config, scanner
-from .pricing import PRICING, cache_savings_for
+from .pricing import cache_savings_over_models, family_for
 
 log = logging.getLogger("suprbar.report")
 
@@ -79,15 +79,38 @@ def _week_starts_on() -> str:
         return "mon"
 
 
+def _display_theme() -> str:
+    """Report theme honoring the user's ``display.theme``.
+
+    The report stylesheet only ships ``dark`` and ``light`` variants, so the
+    ``auto`` setting (and anything unexpected) collapses to ``dark``.
+    """
+    try:
+        theme = str(config.get_pref("display.theme", "dark") or "dark")
+    except Exception:  # noqa: BLE001
+        theme = "dark"
+    return "light" if theme == "light" else "dark"
+
+
+def _display_accent() -> str:
+    """Report accent honoring the user's ``display.accent`` (default ``blue``)."""
+    try:
+        return str(config.get_pref("display.accent", "blue") or "blue")
+    except Exception:  # noqa: BLE001
+        return "blue"
+
+
 def _cache_savings(totals: dict[str, Any],
                    by_model: list[dict[str, Any]]) -> float:
     """USD saved by cache reads over the window.
 
     ``by_model`` rows don't carry per-model ``cache_read``, so distribute the
     window's total ``cache_read`` across models proportionally to each model's
-    ``tokens`` and sum ``cache_savings_for`` at each model's own input rate
-    (mirrors ``aggregator._compute_cache_savings``). Falls back to the opus
-    input rate when there's no model breakdown to attribute against.
+    ``tokens`` and hand the resulting per-model shares to the shared
+    ``pricing.cache_savings_over_models`` helper, which charges each at its own
+    input rate (the same helper ``aggregator._compute_cache_savings`` uses).
+    Falls back to the opus input rate when there's no model breakdown to
+    attribute against (the helper's leftover path).
     """
     cache_read = int(totals.get("cache_read", 0) or 0)
     if cache_read <= 0:
@@ -95,32 +118,39 @@ def _cache_savings(totals: dict[str, Any],
 
     token_sum = sum(int(m.get("tokens", 0) or 0) for m in by_model)
     if not by_model or token_sum <= 0:
-        rate = PRICING["opus"]["input"]
-        return (cache_read * rate * 0.9) / 1_000_000
+        # Nothing to attribute against — charge the whole window at the opus
+        # rate as a conservative upper bound (the shared helper's leftover path).
+        return cache_savings_over_models([], leftover_cache_read=cache_read)
 
-    saved = 0.0
+    pairs: list[tuple[float, str]] = []
     for m in by_model:
         tokens = int(m.get("tokens", 0) or 0)
         if tokens <= 0:
             continue
         cr_share = cache_read * tokens / token_sum
-        saved += cache_savings_for(
-            {"cache_read_input_tokens": cr_share}, m.get("model", ""))
-    return saved
+        pairs.append((cr_share, m.get("model", "")))
+    return cache_savings_over_models(pairs)
 
 
 def _model_family(models: list[str]) -> str:
-    """First family-ish token of the leading model, else "mixed"."""
+    """First family-ish token of the leading model, else "mixed".
+
+    Delegates the opus/sonnet/haiku match to ``pricing.family_for`` so the
+    report and the cost engine agree on family detection. ``family_for``
+    defaults to ``"opus"`` for an unrecognized id; here we'd rather surface the
+    raw token than mislabel it, so a defaulted ``"opus"`` (where the id doesn't
+    actually contain "opus") falls back to the whole token.
+    """
     if not models:
         return "mixed"
     first = str(models[0] or "").strip()
     if not first:
         return "mixed"
     # e.g. "claude-opus-4-8" -> "opus"; falls back to the whole token.
-    for fam in ("opus", "sonnet", "haiku"):
-        if fam in first.lower():
-            return fam
-    return first
+    fam = family_for(first)
+    if fam == "opus" and "opus" not in first.lower():
+        return first
+    return fam
 
 
 def _build_by_day(by_day: list[dict[str, Any]]) -> tuple[list[list[Any]], str]:
@@ -257,10 +287,13 @@ def build_report() -> dict[str, Any]:
     # ---- previous 30-day window cost (for comparison) ----
     prev_cost = 0.0
     try:
-        prev_start = datetime(today.year, today.month, today.day,
-                              tzinfo=now.tzinfo) - timedelta(days=59)
-        prev_end = datetime(today.year, today.month, today.day,
-                            tzinfo=now.tzinfo) - timedelta(days=29)
+        # Build naive-local dates first, then resolve each to its own UTC
+        # offset via .astimezone(). Freezing ``now.tzinfo`` would stamp the
+        # current offset onto dates that may sit on the other side of a DST
+        # boundary, drifting the window by an hour.
+        base = datetime(today.year, today.month, today.day)
+        prev_start = (base - timedelta(days=59)).astimezone()
+        prev_end = (base - timedelta(days=29)).astimezone()
         prev = scanner.range_summary(
             "custom",
             custom_start=prev_start.isoformat(),
@@ -281,10 +314,12 @@ def build_report() -> dict[str, Any]:
     total_cost = round(float(totals.get("cost", 0.0) or 0.0), 2)
     total_messages = int(totals.get("messages", 0) or 0)
 
-    # ---- top model by message count for the source card ----
+    # ---- top model by cost for the source card ----
+    # Sort by cost (not message count) so the headline "top model" matches the
+    # cost-sorted By-model table the report renders below.
     top_model = "—"
     if by_model:
-        top = max(by_model, key=lambda m: int(m.get("messages", 0) or 0))
+        top = max(by_model, key=lambda m: float(m.get("cost", 0.0) or 0.0))
         top_model = top.get("model", "—") or "—"
 
     by_source = [{
@@ -307,6 +342,8 @@ def build_report() -> dict[str, Any]:
             "machine": _machine_label(),
             "version": "v" + __version__,
             "days": 30,
+            "theme": _display_theme(),
+            "accent": _display_accent(),
         },
         "byDay": by_day_rows,
         "totals": {

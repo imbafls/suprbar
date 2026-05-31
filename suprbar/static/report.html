@@ -305,14 +305,14 @@ body{
     <span class="tb-spacer"></span>
     <div class="tb-group">
       <div class="tb-seg" id="segTheme">
-        <button data-theme="dark" class="on">Dark</button>
+        <button data-theme="dark">Dark</button>
         <button data-theme="light">Light</button>
       </div>
     </div>
     <div class="tb-group">
       <div class="tb-dots" id="segAccent">
         <button class="tb-dot" data-a="violet" aria-label="Violet"></button>
-        <button class="tb-dot on" data-a="blue" aria-label="Blue"></button>
+        <button class="tb-dot" data-a="blue" aria-label="Blue"></button>
         <button class="tb-dot" data-a="green" aria-label="Green"></button>
         <button class="tb-dot" data-a="orange" aria-label="Orange"></button>
         <button class="tb-dot" data-a="pink" aria-label="Pink"></button>
@@ -451,6 +451,13 @@ body{
    render — that's expected.
    ========================================================================== */
 const REPORT = __SUPRBAR_REPORT_JSON__;
+
+/* ---------- apply the user's theme/accent prefs ---------- */
+// The backend emits the user's display.theme / display.accent (defaults
+// dark / blue). Stamp them onto the root dataset so the report opens in the
+// same look as the app; the toolbar derives its "on" states from this below.
+document.documentElement.dataset.theme = REPORT.meta.theme || "dark";
+document.documentElement.dataset.accent = REPORT.meta.accent || "blue";
 
 /* ---------- formatters ---------- */
 const money = n => "$" + n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -641,13 +648,23 @@ $("#rfMeta").textContent = "supr.bar "+REPORT.meta.version+" · "+REPORT.meta.ge
 
 /* ============================  TOOLBAR  ============================ */
 const root = document.documentElement;
+// Drive the toolbar "on" states from the root dataset (set above from the
+// user's prefs) instead of hardcoded markup, so the highlighted theme segment
+// and accent swatch always match what's actually applied.
+function syncToolbar(){
+  document.querySelectorAll("#segTheme button").forEach(b=>
+    b.classList.toggle("on", b.dataset.theme===root.dataset.theme));
+  document.querySelectorAll("#segAccent .tb-dot").forEach(b=>
+    b.classList.toggle("on", b.dataset.a===root.dataset.accent));
+}
+syncToolbar();
 document.querySelectorAll("#segTheme button").forEach(btn=>btn.addEventListener("click",()=>{
   root.dataset.theme=btn.dataset.theme;
-  document.querySelectorAll("#segTheme button").forEach(b=>b.classList.toggle("on",b===btn));
+  syncToolbar();
 }));
 document.querySelectorAll("#segAccent .tb-dot").forEach(btn=>btn.addEventListener("click",()=>{
   root.dataset.accent=btn.dataset.a;
-  document.querySelectorAll("#segAccent .tb-dot").forEach(b=>b.classList.toggle("on",b===btn));
+  syncToolbar();
 }));
 $("#pdfBtn").addEventListener("click",()=>window.print());
 $("#dlBtn").addEventListener("click",()=>{

@@ -52,6 +52,14 @@
         <button class="cretry" type="button" id="connRetryBtn">Retry</button>
       </div>
 
+      <!-- update-available banner (accent-toned, in the .conn flex-none slot) -->
+      <div class="updbar" id="updateBanner" hidden role="status">
+        <span class="upip"></span>
+        <span class="utext" id="updateBannerText">Update available — <b id="updateVersion">v?</b></span>
+        <button class="ubtn primary" type="button" id="updateApplyBtn">Update</button>
+        <button class="ubtn ghost" type="button" id="updateDismissBtn" aria-label="Dismiss">×</button>
+      </div>
+
       <div class="flyout-body" id="flyoutBody">
 
         <!-- ── glance: cost hero ── -->
@@ -191,6 +199,7 @@
           <button class="txtbtn" id="copyPathBtn" data-tip="Copy scan path">Path</button>
           <button class="txtbtn" id="openActiveBtn" data-tip="Open active session file">Active</button>
           <button class="txtbtn" id="openLogsBtn" data-tip="Open ~/.claude/projects (Ctrl+L)">Logs</button>
+          <button class="txtbtn" id="checkUpdateBtn" data-tip="Check for updates">Updates</button>
         </div>
       </footer>
 
@@ -263,6 +272,16 @@
                 <div class="settings-row-main">
                   <div class="lbl">supr.bar <span id="aboutVersion">v0.8</span></div>
                   <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">1–7</span> ranges · <span class="mono">Ctrl+C</span> copy · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> help</div>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-main">
+                  <div class="lbl">Updates</div>
+                  <div class="desc" id="updateAboutStatus">Checking for updates…</div>
+                  <div class="desc" style="margin-top:6px">Updates are downloaded from GitHub. This build isn't code-signed, so Windows SmartScreen may warn — choose "More info → Run anyway".</div>
+                </div>
+                <div class="ctl-wrap">
+                  <button class="btn-sm" id="checkUpdateBtn2" type="button">Check now</button>
                 </div>
               </div>
             </div>
