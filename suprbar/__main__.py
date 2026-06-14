@@ -106,6 +106,28 @@ def main() -> int:
     threading.Thread(target=updater.cleanup_stale_downloads, daemon=True,
                      name="suprbar-upd-cleanup").start()
 
+    # One-time update check at launch (if enabled).
+    if config.get_pref("updates.check_on_launch", True):
+        threading.Thread(target=updater.check_for_update, daemon=True,
+                         name="suprbar-upd-check").start()
+
+    # Periodic update check (every 6 hours) — so long-running suprbar processes
+    # don't miss releases. First check after 6h to avoid stacking on the launch
+    # check. Runs as a daemon; exits with the process.
+    def _periodic_update_check():
+        while not shutdown_event.is_set():
+            shutdown_event.wait(6 * 3600)  # 6 hours
+            if shutdown_event.is_set():
+                break
+            try:
+                st = updater.check_for_update()
+                if st.get("available"):
+                    log.info("periodic update check found v%s", st.get("latest"))
+            except Exception:
+                pass
+    threading.Thread(target=_periodic_update_check, daemon=True,
+                     name="suprbar-upd-periodic").start()
+
     # Signal handling. SIGINT works on all platforms; SIGTERM only off-Windows.
     try:
         signal.signal(signal.SIGINT, shutdown_app)

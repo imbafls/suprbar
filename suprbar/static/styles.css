@@ -53,6 +53,7 @@
   --b-warn:    oklch(0.79 0.15 78);
   --b-danger:  oklch(0.66 0.20 25);
   --b-source-api: oklch(0.72 0.12 210);
+  --b-source-hermes: oklch(0.72 0.12 130);
 
   --b-success-soft: color-mix(in oklab, var(--b-success) 16%, transparent);
   --b-warn-soft:    color-mix(in oklab, var(--b-warn) 18%, transparent);
@@ -562,6 +563,7 @@ body.loading .cost-num {
 .scard.err .s-dot, .source-card.err .source-dot { background: var(--b-danger); }
 .scard.off .s-dot, .source-card.off .source-dot { background: var(--b-faint); }
 .scard.api .s-dot, .source-card.api .source-dot { background: var(--b-source-api); }
+.scard.hermes .s-dot, .source-card.hermes .source-dot { background: var(--b-source-hermes); }
 .scard.err, .source-card.err { border-color: color-mix(in oklab, var(--b-danger) 35%, transparent); }
 .source-card .source-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scard .s-cost, .source-card .source-money { font-family: var(--b-mono); font-weight: 700; font-size: var(--fs-15); color: var(--b-text); }

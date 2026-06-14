@@ -1,5 +1,44 @@
 # supr.bar CHANGELOG
 
+## v0.11.0 — Hermes tracking + multi-model pricing
+
+supr.bar now tracks **Hermes agent** usage alongside Claude Code. The flyout
+shows combined spending across both tools, and the source cards distinguish
+Claude Code, Anthropic API, and Hermes at a glance.
+
+### Hermes usage tracking
+- **New Hermes provider** reads `~/.hermes/sessions/sessions.json` and folds
+  session token counts + costs into the today/range/budget views. Hermes
+  sessions updated within the last 2 minutes show as live.
+- Hermes appears as a **third source card** in the flyout footer (green dot,
+  labeled "Hermes"), with its own platform-based project rows and model
+  breakdowns.
+- **Enabled by default** (`sources.hermes.enabled`); toggle off in Settings if
+  you only want Claude Code tracking.
+
+### Multi-model pricing
+- Added **DeepSeek** rates (deepseek-v4-pro: $0.55/$2.19 per 1M in/out,
+  deepseek-v3: $0.27/$1.10) — the models Hermes uses.
+- Added **GPT-4o** and **GPT-4o-mini** rates for multi-provider users.
+- Added **claude-fable-5** exact-model rate.
+- `family_for()` now recognizes deepseek, gpt-4o, gpt-4o-mini, and
+  claude-fable families alongside the existing Anthropic ones.
+
+### Updates
+- **Periodic update check** every 6 hours in the background (previously only
+  checked once at launch). Long-running suprbar instances now discover new
+  releases without a restart.
+- **Launch-time update check** now runs on a daemon thread (was synchronous but
+  un-started — the code path existed but the thread was never spawned).
+- CI now auto-extracts the relevant section from `CHANGELOG.md` for release
+  notes and generates `SHA256SUMS.txt` + `latest.json` alongside the build
+  artifacts.
+
+### Polish
+- Hermes source card gets its own green dot colour (`--b-source-hermes`) to
+  visually distinguish it from the Claude orange and API blue.
+- Config schema v3 extended with `sources.hermes.enabled`.
+
 ## v0.10.3 — updater live-test target
 
 - A target release so an installed **v0.10.2** build can exercise the in-app

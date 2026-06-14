@@ -14,6 +14,7 @@ from typing import Any
 
 from . import config, scanner
 from .providers import anthropic_api as p_anthropic_api
+from .providers import hermes_local as p_hermes_local
 from .providers import local as p_local
 
 log = logging.getLogger("suprbar.aggregator")
@@ -27,6 +28,8 @@ def _enabled_sources() -> list[str]:
         out.append("local")
     if sources.get("anthropic_api", {}).get("enabled", False):
         out.append("anthropic_api")
+    if sources.get("hermes", {}).get("enabled", True):
+        out.append("hermes")
     return out
 
 
@@ -66,6 +69,14 @@ def today() -> dict[str, Any]:
             log.exception("anthropic_api source failed")
             sources_data.append(_empty_source_failure(
                 "anthropic_api", "Anthropic API", e))
+
+    if "hermes" in enabled:
+        try:
+            sources_data.append(p_hermes_local.today_summary())
+        except Exception as e:  # noqa: BLE001
+            log.exception("hermes source failed")
+            sources_data.append(_empty_source_failure(
+                "hermes", "Hermes · local", e))
 
     # Defensive: make sure every source has an updated_at + extras dict so
     # downstream consumers can rely on the shape.
@@ -117,11 +128,29 @@ def today() -> dict[str, Any]:
     projects_today = int(local_extras.get("projects_today", 0) or 0)
     top_model_today = local_extras.get("top_model_today")
 
+    # Fold in Hermes extras so the flyout shows both Claude + Hermes usage
+    for s in sources_data:
+        if s["id"] == "hermes" and s.get("ok"):
+            hx = s.get("extras", {}) or {}
+            by_project.extend(hx.get("by_project", []) or [])
+            by_model.extend(hx.get("by_model", []) or [])
+            sessions_today += int(hx.get("sessions_today", 0) or 0)
+            projects_today += int(hx.get("projects_today", 0) or 0)
+            if not top_model_today:
+                top_model_today = hx.get("top_model_today")
+            break
+
     # Parse errors surfaced across sources (so the UI / diagnostics
     # endpoint can flag malformed JSONL without rooting around).
     live_sessions: list[dict[str, Any]] = list(
         local_extras.get("live_sessions", []) or []
     )
+    # Fold in Hermes live sessions
+    for s in sources_data:
+        if s["id"] == "hermes" and s.get("ok"):
+            hx = s.get("extras", {}) or {}
+            live_sessions.extend(hx.get("live_sessions", []) or [])
+            break
     parse_errors = int(local_extras.get("parse_errors", 0) or 0)
     scan_source = str(scanner.CLAUDE_HOME)
 

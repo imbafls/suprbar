@@ -424,9 +424,9 @@ function renderSourceCards(sources) {
   }
   host.hidden = false;
   host.innerHTML = rows.map(s => {
-    const kind = s.id === 'local' ? 'local' : s.id === 'anthropic_api' ? 'api' : 'other';
+    const kind = s.id === 'local' ? 'local' : s.id === 'anthropic_api' ? 'api' : s.id === 'hermes' ? 'hermes' : 'other';
     const state = s.ok ? 'ok' : (s.error === 'disabled' || s.error === 'no admin key configured') ? 'off' : 'err';
-    const label = s.id === 'local' ? 'Claude Code' : s.id === 'anthropic_api' ? 'Anthropic API' : (s.label || s.id);
+    const label = s.id === 'local' ? 'Claude Code' : s.id === 'anthropic_api' ? 'Anthropic API' : s.id === 'hermes' ? 'Hermes' : (s.label || s.id);
     const title = s.ok ? `${Number(s.messages_today || 0).toLocaleString()} msgs` : (s.error || 'disabled');
     return `<div class="source-card ${kind} ${state}" title="${escapeAttr(title)}">
       <span class="source-dot"></span>

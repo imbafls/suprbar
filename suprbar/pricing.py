@@ -24,6 +24,13 @@ PRICING: dict[str, dict[str, float]] = {
     "opus":   {"input": 15.0, "output": 75.0},
     "sonnet": {"input": 3.0,  "output": 15.0},
     "haiku":  {"input": 1.0,  "output": 5.0},
+    # Non-Anthropic models (used by Hermes / multi-provider setups)
+    "deepseek":     {"input": 0.55, "output": 2.19},   # deepseek-v4-pro
+    "deepseek-r1":  {"input": 0.55, "output": 2.19},
+    "deepseek-v3":  {"input": 0.27, "output": 1.10},
+    "gpt-4o":       {"input": 2.50, "output": 10.0},
+    "gpt-4o-mini":  {"input": 0.15, "output": 0.60},
+    "claude-fable": {"input": 3.0,  "output": 15.0},   # Claude Code flavour
 }
 
 # Per-exact-model rates. Keys are lower-cased, stripped of the
@@ -50,6 +57,12 @@ MODEL_RATES: dict[str, dict[str, float]] = {
     "claude-haiku-4":    {"input": 1.0,  "output": 5.0},
     "claude-haiku-3-5":  {"input": 0.80, "output": 4.0},
     "claude-haiku-3":    {"input": 0.25, "output": 1.25},
+    # DeepSeek (Hermes primary provider)
+    "deepseek-v4-pro":   {"input": 0.55, "output": 2.19},
+    "deepseek-v3":       {"input": 0.27, "output": 1.10},
+    "deepseek-r1":       {"input": 0.55, "output": 2.19},
+    # Claude Code agent flavours
+    "claude-fable-5":    {"input": 3.0,  "output": 15.0},
 }
 
 CACHE_5M_MULT = 1.25
@@ -66,7 +79,8 @@ def family_for(model: str) -> str:
     """Map a model id to its family. Robust to case + version suffixes.
 
     Tests for ``opus`` / ``sonnet`` / ``haiku`` substrings case-insensitively.
-    Falls back to ``opus`` when nothing matches (preserves prior behavior).
+    Detects deepseek, gpt, and claude-fable families. Falls back to ``opus``
+    when nothing matches (preserves prior behavior).
     """
     m = (model or "").lower()
     if "opus" in m:
@@ -75,6 +89,14 @@ def family_for(model: str) -> str:
         return "sonnet"
     if "haiku" in m:
         return "haiku"
+    if "deepseek" in m:
+        return "deepseek"
+    if "gpt-4o-mini" in m:
+        return "gpt-4o-mini"
+    if "gpt-4o" in m or "gpt-4" in m:
+        return "gpt-4o"
+    if "claude-fable" in m or "fable" in m:
+        return "claude-fable"
     return "opus"
 
 

@@ -45,6 +45,7 @@ DEFAULTS: dict[str, Any] = {
             "enabled": False,
             "admin_key_enc": "",        # DPAPI-encrypted blob (base64)
         },
+        "hermes": {"enabled": True},    # Hermes agent sessions.json
     },
 
     # ---- Tray + startup ----
@@ -412,6 +413,7 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     # sources
     "sources.local.enabled":               ("bool", None),
     "sources.anthropic_api.enabled":       ("bool", None),
+    "sources.hermes.enabled":              ("bool", None),
 }
 
 

@@ -48,6 +48,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, aggregator, config, report, scanner, updater
 from .providers import anthropic_api as p_anthropic_api
+from .providers import hermes_local as p_hermes_local
 from .providers import local as p_local
 
 log = logging.getLogger("suprbar.server")
@@ -609,6 +610,7 @@ def _diagnostics_payload() -> dict:
         "sources": {
             "local": _safe_self_test(p_local),
             "anthropic_api": _safe_self_test(p_anthropic_api),
+            "hermes": _safe_self_test(p_hermes_local),
         },
         "today_cache": {
             "has_data": _today_cache["data"] is not None,
@@ -644,6 +646,7 @@ def _public_config() -> dict:
                 "has_key": bool(key),
                 "key_fingerprint": _fingerprint(key) if key else None,
             },
+            "hermes": cfg.get("sources", {}).get("hermes", {}),
         },
         "ui": cfg.get("ui", {}),
     }
