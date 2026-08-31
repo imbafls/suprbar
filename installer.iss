@@ -10,7 +10,7 @@
 ; from suprbar/__version__ locally and the git tag in CI. The literal below is
 ; only a fallback for a bare `iscc installer.iss` — keep it in sync on release.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.9.0"
+  #define MyAppVersion "0.13.1"
 #endif
 #define MyAppPublisher "Omer Taji"
 #define MyAppURL       "https://github.com/imbafls/suprbar"
@@ -67,7 +67,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch supr.bar"; \
-  Flags: nowait postinstall skipifsilent
+  Flags: nowait postinstall
 
 [UninstallDelete]
 ; Remove autorun key (handled by uninsdeletevalue above) but leave user

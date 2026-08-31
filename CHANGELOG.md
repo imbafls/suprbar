@@ -1,5 +1,15 @@
 # supr.bar CHANGELOG
 
+## v0.13.1 — auto-update restarts the app again
+
+- **Fixed: silent installs never relaunched the app.** The installer's
+  post-install "Launch supr.bar" entry carried Inno's `skipifsilent` flag,
+  and every auto-update runs the installer with `/SILENT` — so updates
+  installed the new version and then quit, leaving no app running. Removing
+  the flag makes `/RESTARTAPPLICATIONS`-style relaunch work for in-app
+  updates; from v0.13.1 onward updates restart cleanly into the new version.
+- Installer fallback version string synced to the current release.
+
 ## v0.13.0 — glance redesign: trend chart, model chips, budget ring
 
 A visible overhaul of the flyout's main view, verified pixel-by-pixel against
