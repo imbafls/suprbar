@@ -1,5 +1,40 @@
 # supr.bar CHANGELOG
 
+## v0.13.0 — glance redesign: trend chart, model chips, budget ring
+
+A visible overhaul of the flyout's main view, verified pixel-by-pixel against
+live data via headless-browser screenshots.
+
+### New in the glance
+- **Daily spend trend chart** — range tabs (7d/week/month/30d/90d) now render
+  a compact bar chart directly under the hero: one bar per day, weekend
+  tinting, today's bar glowing in the accent color, peak-day label. No more
+  opening Details to see a trend.
+- **Top-model chips** — the three most expensive models render as chips under
+  the hero in every view (`opus-5 $15,312 · fable-5 $464.70 · …`). Where the
+  money actually went is now a glance-level fact. Deliberately independent of
+  the "Show model name" pref (that governs the Model metric tile).
+- **Budget ring gauge** — the daily/weekly/monthly budget is now a compact
+  circular gauge with the spent/limit numbers beside it; amber near the
+  threshold, red over, with the existing pace warning intact.
+- **Honest cold-load state** — switching to a range whose scan hasn't landed
+  shows "Loading last 30 days…" instead of silently displaying today's
+  numbers under a range tab.
+
+### Fixes & perf
+- **Tab switches no longer force server rescans** — the client was sending
+  `refresh=1` on every tab click, invalidating the server's entire range
+  cache and re-scanning ~1.2k JSONL files for a number it had cached 5
+  seconds ago. Tab switches now use the server's 30s cache; F5 still forces.
+- **`/api/budgets` skips its three full scans when no budget is set** — the
+  flyout polls it every 30s even with budgets disabled; it now returns a
+  zero-shape instantly instead of scanning today+week+month for nothing.
+- **`?range=30d` deep-link** — opens the flyout directly on a range (also how
+  the screenshots in this changelog were automated).
+- Shorter source names in the hero eyebrow ("Claude Code + Hermes + opencode"
+  instead of "… · local" triplets), and the label no longer falls back to
+  "~/.claude" on range-first restores.
+
 ## v0.12.0 — opencode tracking + by-model costs + UI/UX pass
 
 supr.bar now tracks **opencode** sessions alongside Claude Code, Hermes, and

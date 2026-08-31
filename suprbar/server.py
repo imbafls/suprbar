@@ -45,6 +45,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from typing import Any
 
 from . import __version__, aggregator, config, report, scanner, updater
 from .providers import anthropic_api as p_anthropic_api
@@ -836,6 +837,15 @@ def _budgets_payload() -> dict:
     weekly  = float(b.get("weekly_limit",  0.0) or 0.0)
     monthly = float(b.get("monthly_limit", 0.0) or 0.0)
     alert_pct = int(b.get("alert_at_pct", 80) or 80)
+    if not (daily or weekly or monthly):
+        # No limits configured — skip the three range scans entirely. The
+        # flyout polls this every 30s; scanning ~1.2k JSONL files for a
+        # feature that's off was pure waste.
+        def _zero() -> dict[str, Any]:
+            return {"spent": 0.0, "limit": 0.0, "pct": 0.0,
+                    "over": False, "remaining": 0.0, "alerting": False}
+        return {"daily": _zero(), "weekly": _zero(), "monthly": _zero(),
+                "alert_pct": alert_pct}
     week_starts = cfg.get("range", {}).get("week_starts_on", "mon")
     s = scanner.budgets_summary(
         daily, weekly, monthly,

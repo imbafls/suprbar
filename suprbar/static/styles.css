@@ -323,12 +323,23 @@ body.loading .cost-num {
 .source-line .pill.api { color: var(--b-source-api); }
 
 /* ====================  FUEL GAUGE (budget)  =========================== */
-.fuel { display: flex; flex-direction: column; gap: var(--sp-2); }
-.fuel-top { display: flex; justify-content: space-between; align-items: baseline; }
-.fuel-top .lbl { font-size: var(--fs-10); letter-spacing: .08em; text-transform: uppercase; color: var(--b-dimmer); }
-.fuel-top .amt { font-family: var(--b-mono); font-size: var(--fs-12); font-weight: 600; }
+.fuel { display: flex; flex-direction: row; align-items: center; gap: var(--sp-3); }
+.fuel-ring { width: 42px; height: 42px; flex: none; transform: rotate(-90deg); }
+.fuel-ring circle { fill: none; stroke-width: 5; }
+.fuel-ring .fr-bg { stroke: var(--b-surface-3); }
+.fuel-ring .fr-val {
+  stroke: var(--b-accent); stroke-linecap: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100;
+  transition: stroke-dashoffset .45s cubic-bezier(.2,.7,.3,1), stroke .3s;
+}
+.fuel-ring.warn .fr-val { stroke: var(--b-warn); }
+.fuel-ring.over .fr-val { stroke: var(--b-danger); }
+.fuel-txt { flex: 1; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.fuel-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.fuel-top .lbl { font-size: var(--fs-10); letter-spacing: .08em; text-transform: uppercase; color: var(--b-dim); }
+.fuel-top .amt { font-family: var(--b-mono); font-size: var(--fs-12); font-weight: 700; white-space: nowrap; }
 .fuel-top .amt .lim { color: var(--b-dimmer); font-weight: 500; }
-.fuel-sub { font-size: var(--fs-10); font-family: var(--b-mono); color: var(--b-dimmer); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.fuel-sub { font-size: var(--fs-10); font-family: var(--b-mono); color: var(--b-dimmer); display: flex; gap: 6px; align-items: baseline; }
 .fuel-sub .over { color: var(--b-warn); font-weight: 600; }
 .fuel-sub .over:empty { display: none; }
 .fuel-sub .sep { opacity: .5; }
@@ -341,6 +352,42 @@ body.loading .cost-num {
 }
 .bar-fill.warn { background: linear-gradient(90deg, var(--b-warn), color-mix(in oklab, var(--b-warn) 70%, white)); }
 .bar-fill.over { background: linear-gradient(90deg, var(--b-danger), color-mix(in oklab, var(--b-danger) 70%, white)); }
+
+/* — daily spend trend chart (glance view) — */
+.trend { display: flex; flex-direction: column; gap: var(--sp-2); }
+.trend-head { display: flex; justify-content: space-between; align-items: baseline; }
+.trend-head .ttl { font-size: var(--fs-10); letter-spacing: .08em; text-transform: uppercase; color: var(--b-dim); }
+.trend-head .trend-max { font-family: var(--b-mono); font-size: var(--fs-10); color: var(--b-dimmer); }
+.trend-bars {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 2px;
+  height: 44px; padding: 2px;
+  background: var(--b-surface-2); border-radius: var(--r-2);
+}
+.trend-bars .tb { flex: 1 1 0; min-width: 2px; max-width: 22px; height: 100%; display: flex; align-items: flex-end; }
+.trend-bars .tb i {
+  display: block; width: 100%; height: 0%;
+  min-height: 1px; border-radius: 2px;
+  background: color-mix(in oklab, var(--b-accent) 55%, var(--b-surface-3));
+  transition: height .35s var(--ease);
+}
+.trend-bars .tb.wknd i { background: color-mix(in oklab, var(--b-accent) 28%, var(--b-surface-3)); }
+.trend-bars .tb.today i {
+  background: linear-gradient(180deg, var(--b-accent-hot), var(--b-accent));
+  box-shadow: 0 0 8px color-mix(in oklab, var(--b-accent) 45%, transparent);
+}
+.trend-bars .tb.zero i { background: var(--b-surface-3); }
+
+/* — top-model chips (glance view) — */
+.model-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.model-chips .mchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: var(--r-pill);
+  background: var(--b-surface-2); border: 1px solid var(--b-line);
+  font-family: var(--b-mono); font-size: var(--fs-10); color: var(--b-dim);
+  max-width: 100%; overflow: hidden; white-space: nowrap;
+}
+.model-chips .mchip b { color: var(--b-text); font-weight: 700; }
+.model-chips .mchip:first-child { border-color: var(--b-accent-line); }
 
 /* ====================  NOW BURNING card  ============================== */
 .nowcard { background: var(--b-accent-ghost); border: 1px solid var(--b-accent-line); border-radius: var(--r-2); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }

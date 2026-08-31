@@ -16,10 +16,9 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.12 — opencode tracking (SQLite), per-model cost breakdown,
-> OpenRouter + OpenAI all-device actuals, and a CI workflow. Builds on the
-> glance-first flyout, the 30-day usage report, and the lean, fully-wired
-> settings surface.
+> **Status:** v0.13 — glance redesign (daily trend chart, top-model chips,
+> budget ring gauge) on top of v0.12's opencode tracking, per-model costs,
+> OpenRouter + OpenAI all-device actuals, and CI.
 
 ## What it does
 

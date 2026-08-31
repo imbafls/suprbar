@@ -511,6 +511,68 @@ function renderByModel(d) {
   }).join('');
 }
 
+function renderModelChips(d) {
+  const host = document.getElementById('modelChips');
+  if (!host) return;
+  // NOTE: intentionally NOT tied to display.show_model — that pref governs
+  // the "Model" metric tile; the chips are a cost breakdown ("where the
+  // money went") and stay visible independently.
+  const rows = (Array.isArray(d.by_model) ? d.by_model : [])
+    .filter(m => Number(m?.cost || 0) > 0.0001 || Number(m?.tokens || 0) > 0)
+    .slice(0, 3);
+  if (!rows.length) {
+    host.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+  host.hidden = false;
+  host.innerHTML = rows.map(m => {
+    const full = m.model || 'unknown';
+    return `<span class="mchip" title="${escapeAttr(full)}">` +
+      `${escape(shortModel(full))} <b>${fmtMoney(Number(m.cost || 0))}</b></span>`;
+  }).join('');
+}
+
+function _localTodayIso() {
+  const n = new Date();
+  const p = (x) => String(x).padStart(2, '0');
+  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+}
+
+function renderTrendChart(d) {
+  const block = document.getElementById('trendBlock');
+  const host = document.getElementById('trendBars');
+  if (!block || !host) return;
+  const rows = Array.isArray(d?.by_day) ? d.by_day : [];
+  if (rows.length < 2) {
+    block.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+  block.hidden = false;
+  const todayIso = _localTodayIso();
+  const max = Math.max(...rows.map(r => Number(r.cost || 0)), 0);
+  const peak = rows.reduce((a, b) => (Number(b.cost || 0) > Number(a.cost || 0) ? b : a), rows[0]);
+  const maxEl = document.getElementById('trendMax');
+  if (maxEl) {
+    maxEl.textContent = max > 0
+      ? `peak ${fmtMoney(Number(peak.cost || 0))}`
+      : 'no spend yet';
+  }
+  host.innerHTML = rows.map(r => {
+    const cost = Number(r.cost || 0);
+    const pct = max > 0 ? Math.max(cost > 0 ? 4 : 1.5, (cost / max) * 100) : 1.5;
+    const dt = r.date ? new Date(r.date + 'T00:00:00') : null;
+    const lbl = dt ? dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : r.date;
+    const cls = ['tb'];
+    if (r.date === todayIso) cls.push('today');
+    else if (dt && (dt.getDay() === 0 || dt.getDay() === 6)) cls.push('wknd');
+    if (cost <= 0) cls.push('zero');
+    return `<span class="${cls.join(' ')}" title="${escapeAttr(`${lbl} · ${fmtMoney(cost)}`)}">` +
+      `<i style="height:${pct.toFixed(1)}%"></i></span>`;
+  }).join('');
+}
+
 function buildUsageSummary(d) {
   const t = totalsFromPayload(d);
   const active = d.active || (Array.isArray(d.live_sessions) ? d.live_sessions[0] : null);
@@ -550,6 +612,10 @@ function render(d) {
     .map(s => {
       if (s.id === 'local') return 'Claude Code';
       if (s.id === 'anthropic_api') return 'API';
+      if (s.id === 'hermes') return 'Hermes';
+      if (s.id === 'opencode') return 'opencode';
+      if (s.id === 'openrouter') return 'OpenRouter';
+      if (s.id === 'openai') return 'OpenAI';
       return s.label;
     });
   const lblEl = $('costLabel');
@@ -623,6 +689,9 @@ function render(d) {
   renderLiveSessions(d);
   renderStatusStrip(d);
   renderByModel(d);
+  renderModelChips(d);
+  const trendEl = document.getElementById('trendBlock');
+  if (trendEl) trendEl.hidden = true;   // today uses the hourly spark in Details
   updateProjectsTitle(d);
 
   // Active vs Idle
@@ -1709,9 +1778,19 @@ function setRange(key) {
   } else {
     // Show a tiny "loading…" hint by dimming the cost number briefly.
     document.getElementById('costNum')?.classList.add('loading');
+    // Cold range scans can take seconds on big log dirs — say so, instead of
+    // silently showing today's numbers under a range tab.
+    const RANGE_LABELS = { '24h': 'last 24h', '7d': 'last 7 days',
+                           week: 'this week', month: 'this month',
+                           '30d': 'last 30 days', '90d': 'last 90 days' };
+    const lblEl = document.getElementById('costLabel');
+    if (lblEl) lblEl.textContent = `Loading ${RANGE_LABELS[key] || key}…`;
   }
   // 2) Fetch fresh in the background; replaces the paint when it arrives.
-  load({ refresh: true }).then(() => {
+  // NOTE: no refresh=1 here — the server caches range scans for 30s so tab
+  // switches stay instant. Forcing a refresh on every click invalidated the
+  // whole server-side range cache and triggered multi-second rescans.
+  load({}).then(() => {
     document.getElementById('costNum')?.classList.remove('loading');
   });
 }
@@ -1720,7 +1799,12 @@ document.querySelectorAll('.range-tabs .rt').forEach(btn => {
   btn.addEventListener('click', () => setRange(btn.dataset.range));
 });
 
-if (currentRange !== 'today') {
+// Deep-link a range via ?range=30d (also handy for testing/screenshots);
+// otherwise restore the persisted tab.
+const urlRange = new URLSearchParams(location.search).get('range');
+if (urlRange && /^(today|24h|7d|week|month|30d|90d)$/.test(urlRange)) {
+  setTimeout(() => setRange(urlRange), 0);
+} else if (currentRange !== 'today') {
   setTimeout(() => setRange(currentRange), 0);
 }
 
@@ -1756,6 +1840,13 @@ function prefetchRanges() {
     .catch(() => {});
   // Stagger by ~80ms each so we don't spike the local server.
   keys.forEach((k, i) => setTimeout(() => fire(k), 80 * i));
+  // Prime the today snapshot as well: on a range-first restore (popup
+  // reopens on the last-used tab) render() never runs, so without this the
+  // source names / live sessions would never arrive.
+  fetch('/api/today', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d && !_rangeCache.get('today')) _rangeCache.set('today', d); })
+    .catch(() => {});
 }
 // Kick off after the page has had a chance to render today first.
 setTimeout(prefetchRanges, 250);
@@ -1793,9 +1884,13 @@ function renderRangeData(d) {
 
   // label
   const lbl = document.getElementById('costLabel');
-  if (lbl) lbl.textContent = (d.range?.label ? d.range.label[0].toUpperCase() + d.range.label.slice(1) : currentRange) + ' · Claude Code';
+  if (lbl) lbl.textContent = (d.range?.label ? d.range.label[0].toUpperCase() + d.range.label.slice(1) : currentRange) + ' · ' + watchingHint(d);
 
   const todaySnap = _rangeCache.get('today');
+  // Sources may not be known yet on a range-first restore — borrow them from
+  // the cached today snapshot so the label reads "Claude Code + opencode"
+  // instead of the ~/.claude fallback.
+  if (todaySnap?.sources) rememberSources(todaySnap.sources);
   if (todaySnap?.live_sessions?.length) {
     renderLiveSessions(todaySnap);
   } else {
@@ -1805,6 +1900,9 @@ function renderRangeData(d) {
   renderImpactStrip(d);
   renderHourlySparkline(d.hourly);
   renderStatusStrip(d);
+  renderByModel(d);
+  renderModelChips(d);
+  renderTrendChart(d);
   updateProjectsTitle(d);
   const live = document.getElementById('liveIndicator');
   if (live) { live.hidden = false; live.classList.add('dim'); live.textContent = `${t.sessions ?? 0} sess · ${t.projects ?? 0} proj`; }
@@ -1866,13 +1964,15 @@ function renderBudget(b) {
   if (!strip) return;
   if (!active) { strip.hidden = true; return; }
   strip.hidden = false;
-  const fill = document.getElementById('bsFill');
-  if (!fill) return;
+  // Ring gauge: normalized pathLength=100 → dashoffset is the empty share.
+  const arc = document.getElementById('frArc');
+  const ring = strip.querySelector('.fuel-ring');
+  if (!arc || !ring) return;
   const pctVal = Math.min(100, Math.max(0, active.pct));
-  fill.style.width = pctVal.toFixed(1) + '%';
-  fill.classList.remove('warn', 'over');
-  if (active.pct >= 100) fill.classList.add('over');
-  else if (active.alerting) fill.classList.add('warn');
+  arc.style.strokeDashoffset = String(100 - pctVal);
+  ring.classList.remove('warn', 'over');
+  if (active.pct >= 100) ring.classList.add('over');
+  else if (active.alerting) ring.classList.add('warn');
   const pct = document.getElementById('bsPct');
   if (pct) {
     pct.textContent = active.pct >= 1000 ? '>999%' : active.pct.toFixed(0) + '%';
