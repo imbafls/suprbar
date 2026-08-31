@@ -25,7 +25,7 @@ def today_summary() -> dict[str, Any]:
         raw = scanner.today_summary()
         _last_fetch_ts = time.time()
         _last_error = None
-    except Exception as e:  # noqa: BLE001 — never let the local source kill the tray
+    except Exception as e:
         _last_error = f"{type(e).__name__}: {e!s:.160}"
         return {
             "id": "local",

@@ -54,6 +54,9 @@
   --b-danger:  oklch(0.66 0.20 25);
   --b-source-api: oklch(0.72 0.12 210);
   --b-source-hermes: oklch(0.72 0.12 130);
+  --b-source-opencode: oklch(0.72 0.13 300);
+  --b-source-openrouter: oklch(0.75 0.13 265);
+  --b-source-openai: oklch(0.78 0.14 175);
 
   --b-success-soft: color-mix(in oklab, var(--b-success) 16%, transparent);
   --b-warn-soft:    color-mix(in oklab, var(--b-warn) 18%, transparent);
@@ -564,12 +567,38 @@ body.loading .cost-num {
 .scard.off .s-dot, .source-card.off .source-dot { background: var(--b-faint); }
 .scard.api .s-dot, .source-card.api .source-dot { background: var(--b-source-api); }
 .scard.hermes .s-dot, .source-card.hermes .source-dot { background: var(--b-source-hermes); }
+.scard.opencode .s-dot, .source-card.opencode .source-dot { background: var(--b-source-opencode); }
+.scard.openrouter .s-dot, .source-card.openrouter .source-dot { background: var(--b-source-openrouter); }
+.scard.openai .s-dot, .source-card.openai .source-dot { background: var(--b-source-openai); }
 .scard.err, .source-card.err { border-color: color-mix(in oklab, var(--b-danger) 35%, transparent); }
 .source-card .source-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scard .s-cost, .source-card .source-money { font-family: var(--b-mono); font-weight: 700; font-size: var(--fs-15); color: var(--b-text); }
 .source-card .source-money { font-size: var(--fs-12); justify-self: end; }
 .scard.off .s-cost, .source-card.off .source-money { color: var(--b-dimmer); }
 .scard .s-sub { font-size: var(--fs-9); color: var(--b-dimmer); font-family: var(--b-mono); }
+
+/* — by-model cost breakdown — */
+.models { display: flex; flex-direction: column; gap: 6px; }
+.model-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.model-rows li { display: grid; grid-template-columns: minmax(72px, auto) 1fr auto; align-items: center; gap: 8px; }
+.model-rows .mname { color: var(--b-text); font-size: var(--fs-11); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 128px; }
+.model-rows .mbar { height: 6px; border-radius: 4px; background: var(--b-faint); overflow: hidden; }
+.model-rows .mbar > span { display: block; height: 100%; border-radius: 4px; background: var(--b-accent); opacity: .85; }
+.model-rows li:nth-child(2) .mbar > span { background: var(--b-accent-2); }
+.model-rows .mval { font-family: var(--b-mono); color: var(--b-dimmer); font-size: var(--fs-10); white-space: nowrap; }
+
+/* — footer overflow menu — */
+.foot-more { position: relative; }
+.foot-more > summary { list-style: none; cursor: pointer; user-select: none; }
+.foot-more > summary::-webkit-details-marker { display: none; }
+.foot-more[open] > summary { color: var(--b-accent); }
+.foot-more-menu {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30;
+  min-width: 168px; padding: 4px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--b-elevated); border: 1px solid var(--b-line-2);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+.foot-more-menu .txtbtn { justify-content: flex-start; width: 100%; text-align: left; white-space: nowrap; }
 
 /* ====================  BUTTONS  ====================================== */
 .btn, .btn-sm, .btn-xs {

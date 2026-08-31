@@ -61,21 +61,21 @@ def _parse_day(date_iso: str) -> datetime | None:
 def _monthly_limit() -> float:
     try:
         return float(config.get_pref("budgets.monthly_limit", 0.0) or 0.0)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0.0
 
 
 def _alert_pct() -> int:
     try:
         return int(config.get_pref("budgets.alert_at_pct", 80) or 80)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 80
 
 
 def _week_starts_on() -> str:
     try:
         return str(config.get_pref("range.week_starts_on", "mon") or "mon")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "mon"
 
 
@@ -87,7 +87,7 @@ def _display_theme() -> str:
     """
     try:
         theme = str(config.get_pref("display.theme", "dark") or "dark")
-    except Exception:  # noqa: BLE001
+    except Exception:
         theme = "dark"
     return "light" if theme == "light" else "dark"
 
@@ -96,7 +96,7 @@ def _display_accent() -> str:
     """Report accent honoring the user's ``display.accent`` (default ``blue``)."""
     try:
         return str(config.get_pref("display.accent", "blue") or "blue")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "blue"
 
 
@@ -228,7 +228,7 @@ def _zero_filled_by_day(start_day, days: int = 30) -> list[list[Any]]:
 def _machine_label() -> str:
     try:
         host = socket.gethostname() or "?"
-    except Exception:  # noqa: BLE001
+    except Exception:
         host = "?"
     osname = f"{platform.system()} {platform.release()}".strip() or "?"
     return f"{host} · {osname}"
@@ -253,7 +253,7 @@ def build_report() -> dict[str, Any]:
             denylist=deny,
             anonymize=anon,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("range_summary(30d) failed; emitting empty report")
         r = None
 
@@ -304,7 +304,7 @@ def build_report() -> dict[str, Any]:
             anonymize=anon,
         )
         prev_cost = float((prev.get("totals", {}) or {}).get("cost", 0.0) or 0.0)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("previous-window range_summary failed; prevMonthCost=0")
         prev_cost = 0.0
 

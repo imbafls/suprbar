@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from .. import __version__, config
@@ -64,7 +64,7 @@ def _today_bounds_utc() -> tuple[datetime, datetime]:
     today = now.date()
     start_local = datetime(today.year, today.month, today.day, tzinfo=now.tzinfo)
     end_local = start_local + timedelta(days=1)
-    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+    return start_local.astimezone(UTC), end_local.astimezone(UTC)
 
 
 def _rfc3339(dt: datetime) -> str:
@@ -115,7 +115,7 @@ def _http_get(path: str, params: dict, api_key: str) -> dict:
     # Final attempt — let any exception escape to the caller
     try:
         return _http_get_once(path, params, api_key)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         if last_exc is not None:
             raise last_exc from e
         raise
@@ -136,10 +136,9 @@ def _fetch_cost_today(api_key: str) -> tuple[float, dict]:
     raw = _http_get("/v1/organizations/cost_report", params, api_key)
     total_cents = 0.0
     for bucket in raw.get("data", []):
-        b_start = datetime.fromisoformat(
-            bucket.get("starting_at", "").replace("Z", "+00:00"))
-        b_end = datetime.fromisoformat(
-            bucket.get("ending_at", "").replace("Z", "+00:00"))
+        # 3.11+ fromisoformat parses the trailing "Z" directly.
+        b_start = datetime.fromisoformat(bucket.get("starting_at", ""))
+        b_end = datetime.fromisoformat(bucket.get("ending_at", ""))
         # Overlap fraction with [start, end]
         overlap_start = max(b_start, start)
         overlap_end = min(b_end, end)
@@ -234,7 +233,7 @@ def today_summary() -> dict[str, Any]:
     except urllib.error.HTTPError as e:
         try:
             msg = e.read().decode("utf-8", errors="replace")[:200]
-        except Exception:  # noqa: BLE001
+        except Exception:
             msg = str(e)
         base["error"] = f"HTTP {e.code}: {msg}"
         _last_error = base["error"]
@@ -301,10 +300,10 @@ def test_connection(api_key: str) -> tuple[bool, str]:
     except urllib.error.HTTPError as e:
         try:
             body = e.read().decode("utf-8", errors="replace")
-        except Exception:  # noqa: BLE001
+        except Exception:
             body = ""
         return False, f"HTTP {e.code}: {body[:200]}"
     except urllib.error.URLError as e:
         return False, f"network: {e.reason!s:.120}"
-    except Exception as e:  # noqa: BLE001 - surface any other failure
+    except Exception as e:
         return False, f"{type(e).__name__}: {e!s:.120}"

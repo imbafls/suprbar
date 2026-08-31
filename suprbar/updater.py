@@ -39,7 +39,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -113,7 +113,7 @@ def _host_ok(url: str) -> bool:
     *.githubusercontent.com asset CDN."""
     try:
         sp = urlsplit(url)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     if sp.scheme != "https" or not sp.hostname:
         return False
@@ -195,7 +195,7 @@ def _get_json(url: str) -> dict:
     # Final attempt — let any exception escape to the caller
     try:
         return _get_json_once(url)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         if last_exc is not None:
             raise last_exc from e
         raise
@@ -214,7 +214,7 @@ def _empty_status(error: str | None = None) -> dict:
         "size": None,
         "notes_url": None,
         "error": error,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -230,7 +230,7 @@ def check_for_update() -> dict:
         release = _get_json(LATEST_URL)
     except urllib.error.HTTPError as e:
         st = _empty_status(f"github http {e.code}")
-    except Exception as e:  # noqa: BLE001 — network/timeout/parse
+    except Exception as e:
         st = _empty_status(f"check failed: {e}")
     else:
         tag = str(release.get("tag_name") or "").strip()
@@ -250,7 +250,7 @@ def check_for_update() -> dict:
     # Persist throttle/state; never let a config error mask the result.
     try:
         config.set_many({"updates.last_check": st["checked_at"]})
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.debug("could not persist updates.last_check", exc_info=True)
     with _lock:
         _last_status = st
@@ -350,7 +350,7 @@ def _delayed_quit(fn) -> None:
     try:
         if fn:
             fn()
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("quit during update failed")
 
 
@@ -368,7 +368,7 @@ def cleanup_stale_downloads(max_age_hours: int = 24) -> None:
                     shutil.rmtree(p, ignore_errors=True)
             except OSError:
                 continue
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.debug("stale-download cleanup failed", exc_info=True)
 
 
@@ -405,7 +405,7 @@ def download_and_apply(quit_fn=None) -> dict:
         if not ok:
             shutil.rmtree(tmpdir, ignore_errors=True)
             return {"ok": False, "error": why}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         shutil.rmtree(tmpdir, ignore_errors=True)
         return {"ok": False, "error": f"download failed: {e}"}
 
@@ -417,7 +417,7 @@ def download_and_apply(quit_fn=None) -> dict:
 
     try:
         _launch_installer(dest)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"ok": False, "error": f"could not launch installer: {e}"}
 
     # Quit so files unlock; installer (/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS)

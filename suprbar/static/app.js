@@ -241,6 +241,27 @@ function rememberSources(sources) {
   }
 }
 
+function watchingHint(d) {
+  // Human label for what the tray is watching, driven by the sources that
+  // are actually enabled (local's scan path stays as the fallback anchor).
+  const seen = new Set();
+  const names = [];
+  const add = (n) => { if (n && !seen.has(n)) { seen.add(n); names.push(n); } };
+  const labelFor = (id) => id === 'local' ? 'Claude Code'
+    : id === 'anthropic_api' ? 'Anthropic API'
+    : id === 'hermes' ? 'Hermes'
+    : id === 'opencode' ? 'opencode'
+    : id === 'openrouter' ? 'OpenRouter'
+    : id === 'openai' ? 'OpenAI API' : id;
+  for (const s of (window.__suprbar_last_sources || [])) add(labelFor(s.id));
+  if (!names.size && d && Array.isArray(d.sources)) {
+    for (const s of d.sources) {
+      if (s.ok || (s.error && s.error !== 'disabled')) add(labelFor(s.id));
+    }
+  }
+  return names.size ? names.join(' + ') : '~/.claude';
+}
+
 // ───────────────────────── Count-up animation (#1) ─────────────────────────
 
 function animateCostTo(target) {
@@ -424,9 +445,9 @@ function renderSourceCards(sources) {
   }
   host.hidden = false;
   host.innerHTML = rows.map(s => {
-    const kind = s.id === 'local' ? 'local' : s.id === 'anthropic_api' ? 'api' : s.id === 'hermes' ? 'hermes' : 'other';
-    const state = s.ok ? 'ok' : (s.error === 'disabled' || s.error === 'no admin key configured') ? 'off' : 'err';
-    const label = s.id === 'local' ? 'Claude Code' : s.id === 'anthropic_api' ? 'Anthropic API' : s.id === 'hermes' ? 'Hermes' : (s.label || s.id);
+    const kind = s.id === 'local' ? 'local' : s.id === 'anthropic_api' ? 'api' : s.id === 'hermes' ? 'hermes' : s.id === 'opencode' ? 'opencode' : s.id === 'openrouter' ? 'openrouter' : s.id === 'openai' ? 'openai' : 'other';
+    const state = s.ok ? 'ok' : (s.error === 'disabled' || s.error === 'no admin key configured' || s.error === 'no key configured') ? 'off' : 'err';
+    const label = s.id === 'local' ? 'Claude Code' : s.id === 'anthropic_api' ? 'Anthropic API' : s.id === 'hermes' ? 'Hermes' : s.id === 'opencode' ? 'opencode' : s.id === 'openrouter' ? 'OpenRouter' : s.id === 'openai' ? 'OpenAI API' : (s.label || s.id);
     const title = s.ok ? `${Number(s.messages_today || 0).toLocaleString()} msgs` : (s.error || 'disabled');
     return `<div class="source-card ${kind} ${state}" title="${escapeAttr(title)}">
       <span class="source-dot"></span>
@@ -458,6 +479,34 @@ function renderProjectList(d) {
         <span class="project-bar"><span style="width:${pct.toFixed(1)}%"></span></span>
       </span>
       <span class="val">${fmtMoney(cost)} · ${Number(p.messages || 0).toLocaleString()} msgs${model ? ' · ' + escape(model) : ''}</span>
+    </li>`;
+  }).join('');
+}
+
+function renderByModel(d) {
+  const block = document.getElementById('byModelBlock');
+  const host = document.getElementById('modelRows');
+  if (!block || !host) return;
+  const rows = (Array.isArray(d.by_model) ? d.by_model : [])
+    .filter(m => Number(m?.cost || 0) > 0 || Number(m?.tokens || 0) > 0);
+  if (!rows.length) {
+    block.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+  block.hidden = false;
+  const max = Math.max(...rows.map(m => Number(m.cost || 0)), 0);
+  const count = document.getElementById('modelCount');
+  if (count) count.textContent = rows.length + (rows.length === 1 ? ' model' : ' models');
+  host.innerHTML = rows.slice(0, 8).map(m => {
+    const cost = Number(m.cost || 0);
+    const pct = max > 0 ? Math.max(4, (cost / max) * 100) : 4;
+    const toks = Number(m.tokens || 0);
+    const label = m.model || 'unknown';
+    return `<li title="${escapeAttr(label)}">
+      <span class="mname">${escape(shortModel(label))}</span>
+      <span class="mbar"><span style="width:${pct.toFixed(1)}%"></span></span>
+      <span class="mval">${fmtMoney(cost)} · ${fmtTokens(toks)}</span>
     </li>`;
   }).join('');
 }
@@ -513,7 +562,7 @@ function render(d) {
       sourceLine.hidden = false;
       sourceLine.innerHTML = sources.map(s => {
         if (!s.ok) {
-          if (s.error === 'disabled' || s.error === 'no admin key configured') {
+          if (s.error === 'disabled' || s.error === 'no admin key configured' || s.error === 'no key configured') {
             return '';
           }
           return `<span class="pill ${escape(srcLabel(s.id))}" title="${escapeAttr(s.error || '')}">${escape(srcLabel(s.id))} · err</span>`;
@@ -547,12 +596,15 @@ function render(d) {
   // Optional metrics (HTML agent may add #mBurn, #cacheHit)
   const burnEl = document.getElementById('mBurn');
   if (burnEl) {
-    // burn-rate $/hr from today.cost over first-message → now (rough).
-    // Use active session start if available, otherwise today's window.
+    // Prefer the server-computed per-session burn rate (measured from
+    // today's first activity), fall back to a local rough estimate.
     let rate = 0;
-    if (active && active.started_at && newCost > 0) {
-      const elapsed = (Date.now() - new Date(active.started_at).getTime()) / 3600000;
-      if (elapsed > 0.01) rate = newCost / elapsed;
+    if (active && newCost > 0) {
+      rate = Number(active.burn_rate_usd_per_hour || 0);
+      if (!rate && active.started_at) {
+        const elapsed = (Date.now() - new Date(active.started_at).getTime()) / 3600000;
+        if (elapsed > 0.01) rate = newCost / elapsed;
+      }
     }
     burnEl.textContent = rate > 0 ? `$${rate.toFixed(2)}/h` : '—';
   }
@@ -570,6 +622,7 @@ function render(d) {
   renderSourceCards(sources);
   renderLiveSessions(d);
   renderStatusStrip(d);
+  renderByModel(d);
   updateProjectsTitle(d);
 
   // Active vs Idle
@@ -612,7 +665,7 @@ function render(d) {
     const mr = $('metricRow'); if (mr) mr.hidden = true;
     const es = $('emptyState'); if (es) es.hidden = false;
     startedAt = null;
-    const scanHint = d.scan_source ? d.scan_source.replace(/^.*[\\/]/, '…/') : '~/.claude';
+    const scanHint = watchingHint(d);
     if (d.last_session_seen) {
       const last = new Date(d.last_session_seen.last_activity);
       const ago = (Date.now() - last.getTime()) / 1000;
@@ -934,6 +987,69 @@ function setKeyStatus(msg, kind) {
   if (kind) el.classList.add(kind);
 }
 
+// Generic binder for the OpenRouter / OpenAI key sections — same
+// test→save→enable flow as the Anthropic section above.
+function bindKeySection({ input, testBtn, clearBtn, status, apiKeyField, enabledField, provider, placeholderOk }) {
+  const statusEl = document.getElementById(status);
+  const set = (msg, kind) => {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.classList.remove('ok', 'err');
+    if (kind) statusEl.classList.add(kind);
+  };
+  const test = async () => {
+    const key = document.getElementById(input)?.value.trim();
+    if (!key) { set('paste a key first', 'err'); return; }
+    set('testing…');
+    try {
+      const res = await fetch('/api/config/test-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, provider }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        await patchConfig({ [apiKeyField]: key, [enabledField]: true });
+        set(placeholderOk || 'saved & connected', 'ok');
+        const el = document.getElementById(input); if (el) el.value = '';
+        loadConfig();
+        load({ refresh: true });
+      } else {
+        set(j.message || 'connection failed', 'err');
+      }
+    } catch (e) {
+      set('request failed: ' + e, 'err');
+    }
+  };
+  document.getElementById(testBtn)?.addEventListener('click', test);
+  document.getElementById(input)?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); test(); }
+  });
+  document.getElementById(clearBtn)?.addEventListener('click', async () => {
+    await patchConfig({ [apiKeyField]: '', [enabledField]: false });
+    const el = document.getElementById(input); if (el) el.value = '';
+    set('cleared', 'ok');
+    loadConfig();
+    load({ refresh: true });
+  });
+}
+
+bindKeySection({
+  input: 'openrouterKeyInput', testBtn: 'testOpenrouterBtn',
+  clearBtn: 'clearOpenrouterBtn', status: 'openrouterKeyStatus',
+  apiKeyField: 'openrouter_api_key', enabledField: 'openrouter_api_enabled',
+  provider: 'openrouter',
+  placeholderOk: 'saved & connected',
+});
+
+bindKeySection({
+  input: 'openaiKeyInput', testBtn: 'testOpenaiBtn',
+  clearBtn: 'clearOpenaiBtn', status: 'openaiKeyStatus',
+  apiKeyField: 'openai_api_key', enabledField: 'openai_api_enabled',
+  provider: 'openai',
+  placeholderOk: 'saved & connected',
+});
+
 // ───────────────────────── Footer buttons ─────────────────────────
 
 $('openLogsBtn')?.addEventListener('click', () => {
@@ -968,6 +1084,30 @@ async function copySummary() {
 }
 
 $('copySummaryBtn')?.addEventListener('click', copySummary);
+
+// Footer overflow menu (···): close on outside click or after an action.
+const footMore = document.getElementById('footMore');
+if (footMore) {
+  document.addEventListener('click', (e) => {
+    if (footMore.open && !footMore.contains(e.target)) footMore.open = false;
+  });
+  footMore.addEventListener('click', (e) => {
+    if (e.target.closest('.foot-more-menu')) footMore.open = false;
+  });
+}
+
+// Remember whether the Details fold was left open (persists across popups).
+const detailsFold = document.getElementById('detailsFold');
+if (detailsFold) {
+  try {
+    detailsFold.open = localStorage.getItem('suprbar.details.open') === '1';
+  } catch (_) { /* ignore */ }
+  detailsFold.addEventListener('toggle', () => {
+    try {
+      localStorage.setItem('suprbar.details.open', detailsFold.open ? '1' : '0');
+    } catch (_) { /* ignore */ }
+  });
+}
 
 // ───────────────────────── CSV export (#5) ─────────────────────────
 
@@ -1216,10 +1356,13 @@ document.addEventListener('keydown', (e) => {
     triggerRefresh();
     return;
   }
-  // Ctrl+C → copy usage summary, but do not steal copy from fields.
+  // Ctrl+C → copy usage summary, but do not steal copy from fields or
+  // from an explicit text selection (e.g. user copying a project name).
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     const t = e.target;
     if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    const sel = window.getSelection?.();
+    if (sel && String(sel).length > 0) return;
     e.preventDefault();
     copySummary();
     return;
@@ -1524,6 +1667,9 @@ const LABELS = {
   // sources
   'sources.local.enabled':              { label: 'Local source',            desc: 'Reads ~/.claude/projects/**/*.jsonl.' },
   'sources.anthropic_api.enabled':      { label: 'Anthropic API source',    desc: 'Org-wide spend via Admin API. Requires key above.' },
+  'sources.opencode.enabled':           { label: 'opencode source',         desc: 'Reads the local opencode SQLite database.' },
+  'sources.openrouter.enabled':         { label: 'OpenRouter source',       desc: 'Account-wide actual spend. Requires key above.' },
+  'sources.openai.enabled':             { label: 'OpenAI source',           desc: 'Org-wide daily costs via admin key. Requires key above.' },
   // ui
   'ui.pinned':         { label: 'Pinned',           desc: 'Popup does not auto-hide.' },
   'ui.start_on_login': { label: 'Start on Windows sign-in', desc: 'Auto-launch when you log in.' },

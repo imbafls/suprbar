@@ -1,5 +1,86 @@
 # supr.bar CHANGELOG
 
+## v0.12.0 — opencode tracking + by-model costs + UI/UX pass
+
+supr.bar now tracks **opencode** sessions alongside Claude Code, Hermes, and
+the Anthropic Admin API. The Details fold gained a **By model** cost
+breakdown, and a raft of correctness fixes landed under the hood.
+
+### opencode usage tracking
+- **New opencode provider** reads the local opencode SQLite database
+  (`~/.local/share/opencode/opencode.db`, WAL-safe read-only) and folds
+  per-message tokens + costs into the today view. Sessions active within the
+  live window show up in "Now burning" and the live count.
+- Projects come from opencode's own project table (worktree basename when
+  unnamed), model breakdowns from the message records.
+- opencode computes cost itself (models.dev rates); messages it can't price
+  fall back to supr.bar's generic model table and are counted in
+  `extras.estimated_messages`.
+- **Enabled by default** (`sources.opencode.enabled`); toggle off in Settings.
+- Reasoning tokens are folded into output (providers bill them as output);
+  opencode's cache write/read map to the cache_1h/cache_read buckets.
+
+### Multi-model pricing
+- **Generic model rate table** (`pricing.GENERIC_MODEL_RATES`): approximate
+  public list prices for GLM, DeepSeek, GPT-4o/4.1/5, o3/o4-mini, Gemini
+  2.x/2.5, Grok, Kimi, Qwen, Mistral, Llama — matched by substring after
+  vendor-prefix stripping. Used only when a source leaves a message unpriced.
+
+### All-device actuals: OpenRouter + OpenAI sources (optional)
+- **OpenRouter provider** reads account-wide cumulative spend from
+  `GET /v1/credits` — actual dollars across every key and device on the
+  account. Because the API exposes no day buckets, "today" is derived from a
+  persisted daily baseline (`openrouter_state.json`): the first poll of each
+  local day snapshots the cumulative total and the card reports spend since
+  that baseline. Overnight spend lands on the new day (documented limitation).
+- **OpenAI provider** reads org-wide daily costs from
+  `GET /v1/organization/costs` (requires an Administrator key), clipped to the
+  local day with per-bucket proration — the same math as the Anthropic provider.
+- Both keys are DPAPI-encrypted (`sources.<name>.key_enc`), off by default,
+  with Test/Clear buttons in Settings and per-source diagnostics.
+- Config import now scrubs every source's key blobs (not just Anthropic's).
+
+### CI
+- **New `ci.yml` workflow** — ruff + mypy + pytest + the pricing self-test run
+  on every push to main and every PR. The repo is now fully clean under all
+  four (`pyproject.toml` pins the tool config; pre-existing lint/type debt
+  was paid down in this release).
+
+### Flyout / UX
+- **By model** section in Details: per-model cost bars + token counts across
+  all sources (top 8, cost-sorted).
+- Footer decluttered: rare actions (scan path, active session file, update
+  check) moved into a **···** overflow menu.
+- Empty state and footer "watching …" hints are now **source-aware**
+  ("Claude Code + opencode" instead of a hardcoded ~/.claude).
+- **Ctrl+C** no longer steals text selections — copy-summary only fires when
+  nothing is selected.
+- The Details fold remembers open/closed across popups (localStorage).
+- Keyboard help labels the Space shortcut's scope; version bumped headers.
+
+### Fixes
+- **opencode/Hermes sources no longer all-or-nothing on bad rows**: Hermes
+  sessions with `"updated_at": null` crashed the whole source for the day
+  (TypeError on `None[:10]`); both call sites now null-safe.
+- **Burn rate for sessions spanning midnight**: the denominator now starts at
+  today's first activity, not the file's first-ever record — overnight
+  sessions no longer dilute $/h. The unused `SESSION_START_GRACE_HOURS`
+  constant was removed and the client metric prefers the server-computed rate.
+- **Hermes live burn rate** divided session cost by idle time; now measures
+  the session's own lifetime (created_at → now).
+- **Double launch update-check removed**: both `__main__` and the tray spawned
+  a GitHub check at startup (double hits, duplicate notifications); the check
+  now lives only in the tray, gated on frozen builds — source checkouts never
+  phone home.
+- **Start-on-login dead path**: the HKCU Run value pointed at
+  `_internal\run.bat` in installed builds (PyInstaller 6 layout) — a file that
+  doesn't exist. Frozen builds now register the exe itself.
+- **`/api/today` single-flight**: a lock prevents every HTTP thread plus the
+  tray loop from running full aggregator scans simultaneously on a TTL miss.
+- Aggregator now **merges by_model/by_project rows by key** across sources
+  (the same model via two sources combined instead of duplicated) and
+  attributes cache savings from every source's per-model cache_read.
+
 ## v0.11.0 — Hermes tracking + multi-model pricing
 
 supr.bar now tracks **Hermes agent** usage alongside Claude Code. The flyout

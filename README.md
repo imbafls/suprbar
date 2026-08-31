@@ -16,19 +16,24 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.10 — in-app auto-update. supr.bar checks GitHub for new
-> releases and installs them in one click (opt-out, no telemetry, unsigned —
-> SmartScreen may warn). Builds on the glance-first flyout, the 30-day usage
-> report, and the lean, fully-wired settings surface.
+> **Status:** v0.12 — opencode tracking (SQLite), per-model cost breakdown,
+> OpenRouter + OpenAI all-device actuals, and a CI workflow. Builds on the
+> glance-first flyout, the 30-day usage report, and the lean, fully-wired
+> settings surface.
 
 ## What it does
 
 - Reads `~/.claude/projects/**/*.jsonl` — no API key required for local mode.
+- Reads the **opencode** SQLite database (`~/.local/share/opencode/opencode.db`)
+  for sessions from opencode, including per-model costs.
 - Optional **Anthropic Admin API** for org-wide actual spend (Settings → Sources).
+- Optional **Hermes** agent sessions (`~/.hermes/sessions/sessions.json`).
 - **Range filters** — today, 24h, 7d, week, month, 30d, 90d.
 - **Budgets** — daily / weekly / monthly limits with tray warnings.
-- **Per-source breakdown** — local Claude Code vs Admin API (more sources planned).
+- **Per-source breakdown** — local Claude Code, opencode, Hermes, Admin API
+  (more sources planned).
 - Live session indicator, burn rate, cache stats, top projects.
+- **By model** cost breakdown across all sources in the Details fold.
 
 ## Install
 
@@ -85,23 +90,24 @@ supr.bar updates itself — there's no separate updater to run.
 ## Architecture
 
 ```
-~/.claude/projects/*.jsonl          Anthropic Admin API (optional)
+~/.claude/projects/*.jsonl          ~/.local/share/opencode/opencode.db
+~/.hermes/sessions/sessions.json    Anthropic Admin API (optional)
         │                                      │
         ▼                                      ▼
- ┌─────────────┐                      ┌──────────────────┐
- │ providers/  │                      │ providers/       │
- │ local.py    │                      │ anthropic_api.py │
- └──────┬──────┘                      └────────┬─────────┘
-        │                                      │
-        └──────────────┬───────────────────────┘
-                       ▼
-              ┌─────────────────┐
-              │  aggregator.py  │  merge sources → /api/today
-              └────────┬────────┘
-                       ▼
-              ┌─────────────────┐
-              │  WebView2 popup │  cost hero + range tabs + budgets
-              └─────────────────┘
+ ┌─────────────┐  ┌──────────────────┐  ┌──────────────────────┐
+ │ providers/  │  │  providers/      │  │  providers/          │
+ │ local.py    │  │  opencode.py     │  │  hermes_local.py     │
+ │             │  │                  │  │  anthropic_api.py    │
+ └──────┬──────┘  └────────┬─────────┘  └──────────┬───────────┘
+        └──────────────────┴───────────┬───────────┘
+                                       ▼
+                              ┌─────────────────┐
+                              │  aggregator.py  │  merge sources → /api/today
+                              └────────┬────────┘
+                                       ▼
+                              ┌─────────────────┐
+                              │  WebView2 popup │  cost hero + range tabs + budgets
+                              └─────────────────┘
 ```
 
 Adding a new AI/tool = implement a provider in `suprbar/providers/` and

@@ -21,7 +21,7 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -31,11 +31,6 @@ CLAUDE_HOME = Path.home() / ".claude" / "projects"
 
 # A session is "live" if its JSONL was appended to within this many seconds.
 LIVE_WINDOW_SECONDS = 60
-
-# Earliest gap inside a single session that breaks "today's session" into a new
-# one. Used so a session that started yesterday still shows "started X ago" if
-# it's been continuously active.
-SESSION_START_GRACE_HOURS = 12
 
 # Worker count for the thread pool.
 _MAX_WORKERS = min(8, (os.cpu_count() or 4))
@@ -80,7 +75,8 @@ def _parse_ts(s: str) -> datetime | None:
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        # 3.11+ fromisoformat handles the trailing "Z" suffix natively.
+        return datetime.fromisoformat(s)
     except ValueError:
         return None
 
@@ -136,8 +132,12 @@ def _serialize(b: dict) -> dict:
 def _live_session_payload(s: dict, now: datetime) -> dict[str, Any]:
     """Public-facing summary for one session file within the live window."""
     burn = 0.0
-    if s.get("first_ts"):
-        secs = max((now - s["first_ts"].astimezone()).total_seconds(), 1.0)
+    # Denominator = today's first activity, NOT the file's first-ever record:
+    # a session that started yesterday is still alive today, but cost_today
+    # only counts today, so measuring from yesterday dilutes the rate.
+    burn_from = s.get("first_ts_today") or s.get("first_ts")
+    if burn_from:
+        secs = max((now - burn_from.astimezone()).total_seconds(), 1.0)
         burn = s["cost_today"] / (secs / 3600.0)
     return {
         "id": s["id"],
@@ -164,6 +164,7 @@ def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
     """
     sess_first_ts: datetime | None = None
     sess_last_ts: datetime | None = None
+    sess_first_ts_today: datetime | None = None
     sess_model: str | None = None
     sess_cost_today = 0.0
     sess_msgs_today = 0
@@ -206,6 +207,9 @@ def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
                     sess_first_ts = dt
                 if sess_last_ts is None or dt > sess_last_ts:
                     sess_last_ts = dt
+                if dt >= midnight_utc and (sess_first_ts_today is None
+                                           or dt < sess_first_ts_today):
+                    sess_first_ts_today = dt
                 sid_in_rec = rec.get("sessionId")
                 if sid_in_rec and not sess_id_in_file:
                     sess_id_in_file = sid_in_rec
@@ -255,6 +259,7 @@ def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
         "by_model": dict(by_model),
         "sess_first_ts": sess_first_ts,
         "sess_last_ts": sess_last_ts,
+        "sess_first_ts_today": sess_first_ts_today,
         "sess_model": sess_model,
         "sess_cost_today": sess_cost_today,
         "sess_msgs_today": sess_msgs_today,
@@ -288,7 +293,7 @@ def today_summary() -> dict[str, Any]:
     today = now.date()
     midnight_local = datetime(today.year, today.month, today.day,
                               tzinfo=now.tzinfo)
-    midnight_utc = midnight_local.astimezone(timezone.utc)
+    midnight_utc = midnight_local.astimezone(UTC)
 
     today_totals = _zero_bucket()
     hourly = [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
@@ -352,11 +357,10 @@ def today_summary() -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
             futs = {ex.submit(_scan_one_file, p, midnight_utc): (p, m, sz)
                     for (p, m, sz) in to_parse}
-            for fut in futs:
-                p, m, sz = futs[fut]
+            for fut, (p, _m, _sz) in futs.items():
                 try:
                     parsed_results[str(p)] = fut.result()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     parsed_results[str(p)] = {"ok": False, "parse_errors": 0}
 
     # Walk candidates in order, attaching the freshly-parsed result where
@@ -423,6 +427,7 @@ def today_summary() -> dict[str, Any]:
                 "path": str(path),
                 "mtime": mtime,
                 "first_ts": result["sess_first_ts"],
+                "first_ts_today": result["sess_first_ts_today"],
                 "last_ts": sess_last_ts,
                 "model": result["sess_model"],
                 "cost_today": result["sess_cost_today"],
@@ -577,15 +582,16 @@ def _resolve_range(range_key: str | None,
                    ) -> tuple[datetime, datetime, str]:
     """Translate a UI range key into concrete (start, end, label) datetimes."""
     now = datetime.now().astimezone()
+    tz: tzinfo | None
     if day_boundary == "utc":
-        now_for_day = now.astimezone(timezone.utc)
-        tz = timezone.utc
+        now_for_day = now.astimezone(UTC)
+        tz = UTC
     else:
         now_for_day = now
         tz = now.tzinfo
     today = now_for_day.date()
 
-    def at_midnight(d):  # noqa: ANN001
+    def at_midnight(d):
         return datetime(d.year, d.month, d.day, tzinfo=tz)
 
     end = at_midnight(today) + timedelta(days=1)
@@ -660,8 +666,8 @@ def range_summary(range_key: str = "today",
         range_key, custom_start, custom_end, week_starts_on,
         day_boundary, rolling_24h,
     )
-    start_utc = start_dt.astimezone(timezone.utc)
-    end_utc   = end_dt.astimezone(timezone.utc)
+    start_utc = start_dt.astimezone(UTC)
+    end_utc   = end_dt.astimezone(UTC)
 
     allow = set(allowlist or [])
     deny  = set(denylist  or [])
@@ -692,10 +698,12 @@ def range_summary(range_key: str = "today",
             continue
 
         try:
-            f = open(path, "r", encoding="utf-8", errors="ignore")
+            # open is guarded separately so a vanished file just skips;
+            # the with-block below owns the close.
+            f = open(path, "r", encoding="utf-8", errors="ignore")  # noqa: SIM115
         except OSError:
             continue
-        try:
+        with f:
             for raw in f:
                 line = raw.strip()
                 if not line or '"usage"' not in line:
@@ -762,8 +770,6 @@ def range_summary(range_key: str = "today",
                         + fields["cache_read"]
                     )
                     hourly[h]["messages"] += 1
-        finally:
-            f.close()
 
     # Fill missing days in range for nicer chart line.
     days_list = []
@@ -779,23 +785,23 @@ def range_summary(range_key: str = "today",
         })
         d += timedelta(days=1)
 
-    by_model_list = sorted([
+    model_rows: list[dict[str, Any]] = [
         {"model": m, "cost": round(v["cost"], 4),
          "messages": int(v["messages"]), "tokens": int(v["tokens"])}
         for m, v in by_model_acc.items()
-    ], key=lambda x: -x["cost"])
+    ]
+    by_model_list = sorted(model_rows, key=lambda x: -float(x["cost"]))
 
     by_project_list = []
-    proj_index = 0
-    for p, v in sorted(by_project_acc.items(), key=lambda kv: -kv[1]["cost"]):
-        proj_index += 1
+    for proj_index, (p, v) in enumerate(
+            sorted(by_project_acc.items(), key=lambda kv: -kv[1]["cost"]), 1):
         display = f"project-{proj_index}" if anonymize else p
         by_project_list.append({
             "project": display,
             "cost": round(v["cost"], 4),
             "messages": int(v["messages"]),
             "tokens": int(v["tokens"]),
-            "models": sorted(list(v["models"])),
+            "models": sorted(v["models"]),
         })
 
     cache_read = totals["cache_read"]

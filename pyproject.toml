@@ -1,0 +1,28 @@
+[project]
+name = "suprbar"
+version = "0.12.0"
+description = "API usage in your tray — Windows tray companion for Claude Code / opencode / Anthropic Admin API spend"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Ignore rules that fight the codebase's deliberate style:
+#   BLE001  broad `except Exception` — intentional in a tray app that must
+#           never crash; every boundary logs and degrades.
+#   S110    try/except/pass — same defensive-shutdown pattern.
+#   I001    import sorting — churn without value here.
+#   DTZ001/DTZ005 — naive-local datetime math is deliberate (calendar-day
+#           boundaries are computed in local time by design).
+ignore = ["BLE001", "S110", "I001", "DTZ001", "DTZ005"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = false
+follow_imports = "normal"
+exclude = ["build", "dist", "graphify-out"]

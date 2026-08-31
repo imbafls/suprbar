@@ -118,7 +118,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
           </div>
           <div class="e-ttl">No sessions running</div>
-          <div class="e-sub" id="emptySub">watching ~/.claude</div>
+          <div class="e-sub" id="emptySub">watching your AI sessions</div>
         </div>
 
         <!-- ── Details: everything secondary folds here ── -->
@@ -145,6 +145,15 @@
                 <span class="li"><span class="sw out"></span>out <b id="legOut">0</b></span>
                 <span class="li"><span class="sw cache"></span>cache <b id="legCache">0</b></span>
               </div>
+            </div>
+
+            <!-- per-model cost breakdown (all sources) -->
+            <div class="models" id="byModelBlock" hidden>
+              <div class="tok-head">
+                <span class="ttl">By model</span>
+                <span class="cache-hit" id="modelCount"></span>
+              </div>
+              <ol class="model-rows" id="modelRows"></ol>
             </div>
 
             <!-- hourly sparkline -->
@@ -191,15 +200,20 @@
 
       <!-- footer -->
       <footer class="b-foot flyout-foot">
-        <span class="meta" id="footMeta">watching ~/.claude</span>
+        <span class="meta" id="footMeta">watching your AI sessions</span>
         <div class="foot-actions actions">
           <button class="txtbtn primary" id="exportBtn" data-tip="Export CSV (Ctrl+E)">Export</button>
           <button class="txtbtn" id="reportBtn" data-tip="Open 30-day report in browser">Report</button>
           <button class="txtbtn" id="copySummaryBtn" data-tip="Copy usage summary (Ctrl+C)">Copy</button>
-          <button class="txtbtn" id="copyPathBtn" data-tip="Copy scan path">Path</button>
-          <button class="txtbtn" id="openActiveBtn" data-tip="Open active session file">Active</button>
           <button class="txtbtn" id="openLogsBtn" data-tip="Open ~/.claude/projects (Ctrl+L)">Logs</button>
-          <button class="txtbtn" id="checkUpdateBtn" data-tip="Check for updates">Updates</button>
+          <details class="foot-more" id="footMore">
+            <summary class="txtbtn" aria-label="More actions" data-tip="More actions">···</summary>
+            <div class="foot-more-menu" role="menu">
+              <button class="txtbtn" id="copyPathBtn" data-tip="Copy scan path" role="menuitem">Copy scan path</button>
+              <button class="txtbtn" id="openActiveBtn" data-tip="Open active session file" role="menuitem">Open active session</button>
+              <button class="txtbtn" id="checkUpdateBtn" data-tip="Check for updates" role="menuitem">Check for updates</button>
+            </div>
+          </details>
         </div>
       </footer>
 
@@ -238,6 +252,42 @@
                     <button class="btn-sm" id="clearKeyBtn">Clear</button>
                   </div>
                   <div class="status-line" id="keyStatus" aria-live="polite"></div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="settings-section-collapse" id="settings-sec-key-or" data-section="key-or">
+            <summary class="settings-section-summary"><span class="sec-title">OpenRouter Key</span></summary>
+            <div class="settings-section-body">
+              <div class="settings-row settings-row-stack">
+                <div class="settings-row-main">
+                  <div class="lbl">OpenRouter API key</div>
+                  <div class="desc">Account-wide actual spend across all keys/devices (<span class="mono">sk-or-…</span>). Today's number is tracked since supr.bar launched — see the provider docs for the exact semantics.</div>
+                  <div class="input-row">
+                    <input type="password" id="openrouterKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-or-…" aria-label="OpenRouter API key">
+                    <button class="btn-sm" id="testOpenrouterBtn">Test</button>
+                    <button class="btn-sm" id="clearOpenrouterBtn">Clear</button>
+                  </div>
+                  <div class="status-line" id="openrouterKeyStatus" aria-live="polite"></div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="settings-section-collapse" id="settings-sec-key-oa" data-section="key-oa">
+            <summary class="settings-section-summary"><span class="sec-title">OpenAI Key</span></summary>
+            <div class="settings-section-body">
+              <div class="settings-row settings-row-stack">
+                <div class="settings-row-main">
+                  <div class="lbl">OpenAI admin key</div>
+                  <div class="desc">Org-wide daily costs (<span class="mono">sk-admin-…</span>, needs the Administrator role). Encrypted on this machine.</div>
+                  <div class="input-row">
+                    <input type="password" id="openaiKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-admin-…" aria-label="OpenAI admin key">
+                    <button class="btn-sm" id="testOpenaiBtn">Test</button>
+                    <button class="btn-sm" id="clearOpenaiBtn">Clear</button>
+                  </div>
+                  <div class="status-line" id="openaiKeyStatus" aria-live="polite"></div>
                 </div>
               </div>
             </div>
@@ -317,7 +367,7 @@
       <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl+L</kbd></li>
       <li><span class="sh-desc">Focus API key</span><kbd>Ctrl+K</kbd></li>
       <li><span class="sh-desc">Export CSV</span><kbd>Ctrl+E</kbd></li>
-      <li><span class="sh-desc">Refresh</span><kbd>Space</kbd></li>
+      <li><span class="sh-desc">Refresh (space, outside controls)</span><kbd>Space</kbd></li>
       <li><span class="sh-desc">Copy summary</span><kbd>Ctrl+C</kbd></li>
       <li><span class="sh-desc">Switch ranges</span><kbd>1–7</kbd></li>
       <li><span class="sh-desc">Hide window</span><kbd>Ctrl+W</kbd></li>

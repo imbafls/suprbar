@@ -80,7 +80,8 @@ def today_summary() -> dict[str, Any]:
         if not isinstance(sess, dict):
             continue
         # Check if session was active today
-        updated = sess.get("updated_at", "")
+        # (or-guard: an explicit JSON null here must not TypeError the loop)
+        updated = sess.get("updated_at") or ""
         if updated and updated[:10] != today_str:
             # Not today — skip for the "today" flyout
             continue
@@ -125,6 +126,15 @@ def today_summary() -> dict[str, Any]:
         except (ValueError, TypeError):
             age = 99999
         if age < 120:
+            # Burn rate over the session's own lifetime (created_at → now),
+            # not over the idle gap since the last update — the old math
+            # shrank the rate the longer a session sat idle.
+            try:
+                created = datetime.fromisoformat(
+                    sess.get("created_at") or updated)
+                span_secs = max((now - created).total_seconds(), 1.0)
+            except (ValueError, TypeError):
+                span_secs = max(age, 1.0)
             live_sessions.append({
                 "id": key,
                 "project": proj_name,
@@ -135,23 +145,23 @@ def today_summary() -> dict[str, Any]:
                 "model": model,
                 "cost_today": round(cost, 4),
                 "messages_today": 1,
-                "burn_rate_usd_per_hour": round(cost / max(age / 3600.0, 0.01), 4) if age > 0 else 0.0,
+                "burn_rate_usd_per_hour": round(cost / (span_secs / 3600.0), 4),
             })
 
-    by_model_list = [
+    model_rows: list[dict[str, Any]] = [
         {"model": m, "cost": round(v["cost"], 4), "messages": int(v["messages"]),
          "tokens": int(v["tokens"]), "cache_read": int(v["cache_read"])}
         for m, v in by_model.items()
     ]
 
-    by_project_list = [
+    project_rows: list[dict[str, Any]] = [
         {"project": p, "cost": round(v["cost"], 4), "messages": int(v["messages"]),
          "tokens": int(v["tokens"]), "models": sorted(v["models"])}
         for p, v in by_project.items() if v["messages"] > 0
     ]
-    by_project_list.sort(key=lambda p: -p["cost"])
+    project_rows.sort(key=lambda p: -float(p["cost"]))
 
-    live_sessions.sort(key=lambda s: -s["cost_today"])
+    live_sessions.sort(key=lambda s: -float(s["cost_today"]))
 
     return {
         "id": "hermes",
@@ -163,15 +173,15 @@ def today_summary() -> dict[str, Any]:
         "messages_today": messages_today,
         "updated_at": now.isoformat(timespec="seconds"),
         "extras": {
-            "by_model": by_model_list,
-            "by_project": by_project_list,
+            "by_model": model_rows,
+            "by_project": project_rows,
             "live_sessions": live_sessions,
             "sessions_today": len([s for s in sessions.values()
                                    if isinstance(s, dict)
-                                   and s.get("updated_at", "")[:10] == today_str]),
-            "projects_today": len(by_project_list),
-            "top_model_today": max(by_model_list, key=lambda m: m["messages"])["model"]
-                               if by_model_list else None,
+                                   and (s.get("updated_at") or "")[:10] == today_str]),
+            "projects_today": len(project_rows),
+            "top_model_today": max(model_rows, key=lambda m: m["messages"])["model"]
+                               if model_rows else None,
         },
     }
 

@@ -6,3 +6,4 @@ design/
 build/
 dist/
 *.spec.bak
+graphify-out/

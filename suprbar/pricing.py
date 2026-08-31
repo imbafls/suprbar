@@ -72,6 +72,80 @@ CACHE_READ_MULT = 0.1
 # 1M-context tier input premium (output unchanged).
 ONE_M_INPUT_MULT = 2.0
 
+# ---- generic multi-provider rates (opencode sessions etc.) ----
+# Approximate public list prices, USD per 1M tokens, matched by substring
+# against the model id (opencode reports ids like "openai/gpt-4o" or
+# "z-ai/glm-5.3-flash" — vendor prefixes are stripped before matching).
+# First match wins, so put more specific patterns first. Used ONLY to
+# estimate messages the source itself couldn't price (cost == 0). Edit
+# freely as prices move.
+GENERIC_MODEL_RATES: list[tuple[str, dict[str, float]]] = [
+    ("gpt-4o-mini",  {"input": 0.15, "output": 0.60}),
+    ("gpt-4o",       {"input": 2.50, "output": 10.0}),
+    ("gpt-4.1-mini", {"input": 0.40, "output": 1.60}),
+    ("gpt-4.1",      {"input": 2.00, "output": 8.00}),
+    ("gpt-5-mini",   {"input": 0.25, "output": 2.00}),
+    ("gpt-5",        {"input": 1.25, "output": 10.0}),
+    ("o4-mini",      {"input": 1.10, "output": 4.40}),
+    ("o3-mini",      {"input": 1.10, "output": 4.40}),
+    ("o3",           {"input": 2.00, "output": 8.00}),
+    ("gemini-2.5-pro",   {"input": 1.25, "output": 10.0}),
+    ("gemini-2.5-flash", {"input": 0.30, "output": 2.50}),
+    ("gemini-2.0-flash", {"input": 0.10, "output": 0.40}),
+    ("grok-4",       {"input": 3.00, "output": 15.0}),
+    ("grok-3",       {"input": 3.00, "output": 15.0}),
+    ("deepseek-r1",  {"input": 0.55, "output": 2.19}),
+    ("deepseek-v4",  {"input": 0.55, "output": 2.19}),
+    ("deepseek-v3",  {"input": 0.27, "output": 1.10}),
+    ("deepseek",     {"input": 0.55, "output": 2.19}),
+    ("kimi",         {"input": 0.60, "output": 2.50}),
+    ("glm-5",        {"input": 0.60, "output": 2.20}),
+    ("glm-4.6",      {"input": 0.60, "output": 2.20}),
+    ("glm-4.5",      {"input": 0.60, "output": 2.20}),
+    ("glm",          {"input": 0.60, "output": 2.20}),
+    ("qwen-max",     {"input": 1.60, "output": 6.40}),
+    ("qwen",         {"input": 0.40, "output": 1.20}),
+    ("mistral-large", {"input": 2.00, "output": 6.00}),
+    ("llama-4",      {"input": 0.30, "output": 0.90}),
+]
+
+
+def generic_rate_for(model: str) -> dict[str, float] | None:
+    """Substring-match a model id against GENERIC_MODEL_RATES.
+
+    Vendor prefixes ("openai/gpt-4o") are stripped before matching; the
+    full id is also tried for providers that encode the tier in the prefix.
+    Returns None when nothing matches.
+    """
+    m = (model or "").lower().strip()
+    if not m:
+        return None
+    tail = m.rsplit("/", 1)[-1]
+    for pat, rates in GENERIC_MODEL_RATES:
+        if pat in tail or pat in m:
+            return rates
+    return None
+
+
+def estimate_generic_cost(model: str, inp: int, out: int,
+                          cache_read: int = 0, cache_write: int = 0,
+                          ) -> float | None:
+    """Best-effort USD cost for an unpriced message from a generic model.
+
+    Assumptions (documented, conservative): cache reads bill at 10% of the
+    input rate, cache writes at 1x. Returns None when the model isn't in
+    the table so callers can leave the message unpriced rather than guess.
+    """
+    rates = generic_rate_for(model)
+    if rates is None:
+        return None
+    return (
+        inp * rates["input"]
+        + out * rates["output"]
+        + cache_read * rates["input"] * CACHE_READ_MULT
+        + cache_write * rates["input"]
+    ) / 1_000_000
+
 
 # ---------------------------------------------------------------- helpers ----
 

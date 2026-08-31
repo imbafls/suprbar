@@ -7,6 +7,7 @@ exactly. Everything else is appended.
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 from datetime import datetime
@@ -16,8 +17,16 @@ from . import config, scanner
 from .providers import anthropic_api as p_anthropic_api
 from .providers import hermes_local as p_hermes_local
 from .providers import local as p_local
+from .providers import openai as p_openai
+from .providers import opencode as p_opencode
+from .providers import openrouter as p_openrouter
 
 log = logging.getLogger("suprbar.aggregator")
+
+# Sources whose ``extras`` breakdowns (by_project / by_model / live_sessions /
+# session counts) get folded into the top-level payload alongside the local
+# source's own breakdowns.
+_FOLD_SOURCE_IDS = ("hermes", "opencode")
 
 
 def _enabled_sources() -> list[str]:
@@ -30,6 +39,12 @@ def _enabled_sources() -> list[str]:
         out.append("anthropic_api")
     if sources.get("hermes", {}).get("enabled", True):
         out.append("hermes")
+    if sources.get("opencode", {}).get("enabled", True):
+        out.append("opencode")
+    if sources.get("openrouter", {}).get("enabled", False):
+        out.append("openrouter")
+    if sources.get("openai", {}).get("enabled", False):
+        out.append("openai")
     return out
 
 
@@ -48,6 +63,37 @@ def _empty_source_failure(source_id: str, label: str, err: Exception) -> dict[st
     }
 
 
+def _merge_rows(rows: list[dict[str, Any]], *, key: str) -> list[dict[str, Any]]:
+    """Merge breakdown rows sharing the same key value.
+
+    Numeric fields are summed; list fields (``models``) are unioned. Used so
+    the same model or project showing up in two sources (e.g. deepseek via
+    Hermes and opencode) combines into one row instead of duplicating.
+    Returns rows sorted by cost, descending.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for r in rows:
+        k = str(r.get(key, "") or "")
+        if not k:
+            continue
+        if k not in merged:
+            merged[k] = copy.deepcopy(r)
+            order.append(k)
+            continue
+        dst = merged[k]
+        for f, v in r.items():
+            if f == key:
+                continue
+            if isinstance(v, list):
+                dst[f] = sorted(set(dst.get(f) or []) | set(v))
+            elif isinstance(v, (int, float)):
+                dst[f] = dst.get(f, 0) + v
+    out = [merged[k] for k in order]
+    out.sort(key=lambda r: -float(r.get("cost", 0) or 0))
+    return out
+
+
 def today() -> dict[str, Any]:
     """Build the unified today-payload consumed by /api/today and the popup."""
     started = time.time()
@@ -57,7 +103,7 @@ def today() -> dict[str, Any]:
     if "local" in enabled:
         try:
             sources_data.append(p_local.today_summary())
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("local source failed")
             sources_data.append(_empty_source_failure(
                 "local", "Claude Code · local", e))
@@ -65,7 +111,7 @@ def today() -> dict[str, Any]:
     if "anthropic_api" in enabled:
         try:
             sources_data.append(p_anthropic_api.today_summary())
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("anthropic_api source failed")
             sources_data.append(_empty_source_failure(
                 "anthropic_api", "Anthropic API", e))
@@ -73,10 +119,34 @@ def today() -> dict[str, Any]:
     if "hermes" in enabled:
         try:
             sources_data.append(p_hermes_local.today_summary())
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("hermes source failed")
             sources_data.append(_empty_source_failure(
                 "hermes", "Hermes · local", e))
+
+    if "opencode" in enabled:
+        try:
+            sources_data.append(p_opencode.today_summary())
+        except Exception as e:
+            log.exception("opencode source failed")
+            sources_data.append(_empty_source_failure(
+                "opencode", "opencode · local", e))
+
+    if "openrouter" in enabled:
+        try:
+            sources_data.append(p_openrouter.today_summary())
+        except Exception as e:
+            log.exception("openrouter source failed")
+            sources_data.append(_empty_source_failure(
+                "openrouter", "OpenRouter", e))
+
+    if "openai" in enabled:
+        try:
+            sources_data.append(p_openai.today_summary())
+        except Exception as e:
+            log.exception("openai source failed")
+            sources_data.append(_empty_source_failure(
+                "openai", "OpenAI API", e))
 
     # Defensive: make sure every source has an updated_at + extras dict so
     # downstream consumers can rely on the shape.
@@ -128,29 +198,35 @@ def today() -> dict[str, Any]:
     projects_today = int(local_extras.get("projects_today", 0) or 0)
     top_model_today = local_extras.get("top_model_today")
 
-    # Fold in Hermes extras so the flyout shows both Claude + Hermes usage
+    # Fold in non-local extras so the flyout shows all sources' usage.
+    # by_model / by_project rows are merged by key so the same model or
+    # project appearing in two sources combines instead of duplicating.
+    by_model = _merge_rows(by_model, key="model")
+    by_project = _merge_rows(by_project, key="project")
     for s in sources_data:
-        if s["id"] == "hermes" and s.get("ok"):
-            hx = s.get("extras", {}) or {}
-            by_project.extend(hx.get("by_project", []) or [])
-            by_model.extend(hx.get("by_model", []) or [])
-            sessions_today += int(hx.get("sessions_today", 0) or 0)
-            projects_today += int(hx.get("projects_today", 0) or 0)
-            if not top_model_today:
-                top_model_today = hx.get("top_model_today")
-            break
+        if s["id"] not in _FOLD_SOURCE_IDS or not s.get("ok"):
+            continue
+        hx = s.get("extras", {}) or {}
+        by_model = _merge_rows(
+            by_model + list(hx.get("by_model", []) or []), key="model")
+        by_project = _merge_rows(
+            by_project + list(hx.get("by_project", []) or []), key="project")
+        sessions_today += int(hx.get("sessions_today", 0) or 0)
+        projects_today += int(hx.get("projects_today", 0) or 0)
+        if not top_model_today:
+            top_model_today = hx.get("top_model_today")
 
     # Parse errors surfaced across sources (so the UI / diagnostics
     # endpoint can flag malformed JSONL without rooting around).
     live_sessions: list[dict[str, Any]] = list(
         local_extras.get("live_sessions", []) or []
     )
-    # Fold in Hermes live sessions
+    # Fold in non-local live sessions
     for s in sources_data:
-        if s["id"] == "hermes" and s.get("ok"):
-            hx = s.get("extras", {}) or {}
-            live_sessions.extend(hx.get("live_sessions", []) or [])
-            break
+        if s["id"] not in _FOLD_SOURCE_IDS or not s.get("ok"):
+            continue
+        hx = s.get("extras", {}) or {}
+        live_sessions.extend(hx.get("live_sessions", []) or [])
     parse_errors = int(local_extras.get("parse_errors", 0) or 0)
     scan_source = str(scanner.CLAUDE_HOME)
 
@@ -159,7 +235,7 @@ def today() -> dict[str, Any]:
     # /api/diagnostics doesn't have to peek into ``sources[0].extras``.
     try:
         scan_meta = scanner.cache_meta()
-    except Exception:  # noqa: BLE001
+    except Exception:
         scan_meta = {"files_reused": 0, "files_reparsed": 0,
                      "last_scan_ms": 0, "parse_errors": 0}
 
@@ -263,21 +339,17 @@ def _compute_cache_savings(sources_data: list[dict[str, Any]],
     # Late import to dodge circular reference at module load time.
     from .pricing import cache_savings_over_models
 
-    # Prefer per-model breakdown from the local source.
-    by_model: list[dict[str, Any]] = []
-    for s in sources_data:
-        if s["id"] == "local":
-            by_model = list(s.get("extras", {}).get("by_model", []) or [])
-            break
-
+    # Prefer per-model breakdowns from every source's extras — the local
+    # scanner tracks cache_read per model, and opencode/hermes report it too.
     pairs: list[tuple[float, str]] = []
     attributed = 0
-    for m in by_model:
-        cr = int(m.get("cache_read", 0) or 0)
-        if cr <= 0:
-            continue
-        pairs.append((cr, m.get("model", "")))
-        attributed += cr
+    for s in sources_data:
+        for m in (s.get("extras", {}) or {}).get("by_model", []) or []:
+            cr = int(m.get("cache_read", 0) or 0)
+            if cr <= 0:
+                continue
+            pairs.append((cr, m.get("model", "")))
+            attributed += cr
 
     leftover = max(0, total_cache_read - attributed)
     return cache_savings_over_models(pairs, leftover)

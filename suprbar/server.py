@@ -50,6 +50,10 @@ from . import __version__, aggregator, config, report, scanner, updater
 from .providers import anthropic_api as p_anthropic_api
 from .providers import hermes_local as p_hermes_local
 from .providers import local as p_local
+from .providers import openai as p_openai
+from .providers import opencode as p_opencode
+from .providers import openrouter as p_openrouter
+from datetime import UTC
 
 log = logging.getLogger("suprbar.server")
 
@@ -58,6 +62,10 @@ GZIP_MIN_BYTES = 1024
 _ALLOWED_KEYS: set[str] = {
     "anthropic_api_key",
     "anthropic_api_enabled",
+    "openrouter_api_key",
+    "openrouter_api_enabled",
+    "openai_api_key",
+    "openai_api_enabled",
     "pinned",
     "start_on_login",
 }
@@ -65,6 +73,9 @@ _ALLOWED_KEYS: set[str] = {
 # /api/today is cached briefly server-side. Provider-level caches still apply.
 _today_cache: dict = {"data": None, "ts": 0.0}
 _TODAY_TTL = 4.0
+# Single-flight: without this, every HTTP thread + the tray refresh loop can
+# miss the TTL simultaneously and all run a full aggregator scan at once.
+_today_lock = threading.Lock()
 
 # /api/range cache — keyed by a fingerprint that includes filters so a config
 # change invalidates automatically. 30s TTL → clicking between tabs is instant
@@ -84,22 +95,23 @@ def _now_monotonic() -> float:
 
 
 def today_cached() -> dict:
-    now = _now_monotonic()
-    if _today_cache["data"] and (now - _today_cache["ts"]) < _TODAY_TTL:
-        return _today_cache["data"]
-    try:
-        data = aggregator.today()
-        _LAST_SCAN["ts"] = time.time()
-        _LAST_SCAN["ok"] = True
-        _LAST_SCAN["elapsed_ms"] = int(data.get("elapsed_ms", 0)) if isinstance(data, dict) else 0
-    except Exception as e:  # noqa: BLE001
-        log.exception("aggregator.today failed: %s", e)
-        _LAST_SCAN["ts"] = time.time()
-        _LAST_SCAN["ok"] = False
-        raise
-    _today_cache["data"] = data
-    _today_cache["ts"] = now
-    return data
+    with _today_lock:
+        now = _now_monotonic()
+        if _today_cache["data"] and (now - _today_cache["ts"]) < _TODAY_TTL:
+            return _today_cache["data"]
+        try:
+            data = aggregator.today()
+            _LAST_SCAN["ts"] = time.time()
+            _LAST_SCAN["ok"] = True
+            _LAST_SCAN["elapsed_ms"] = int(data.get("elapsed_ms", 0)) if isinstance(data, dict) else 0
+        except Exception:
+            log.exception("aggregator.today failed")
+            _LAST_SCAN["ts"] = time.time()
+            _LAST_SCAN["ok"] = False
+            raise
+        _today_cache["data"] = data
+        _today_cache["ts"] = now
+        return data
 
 
 def invalidate_today_cache() -> None:
@@ -109,6 +121,8 @@ def invalidate_today_cache() -> None:
     _report_cache["data"] = None
     _report_cache["ts"] = 0.0
     p_anthropic_api.invalidate_cache()
+    p_openrouter.invalidate_cache()
+    p_openai.invalidate_cache()
 
 
 # /report + /api/report payload cache. build_report() runs TWO full range scans
@@ -289,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
         template = template_path.read_bytes().decode("utf-8")
         try:
             data = report_cached()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return self._send_error(500, "report_failed", str(e))
         # Escape "</" so a project/model name containing "</script>" can't break
         # out of the inline data literal (json.dumps does NOT escape it). Default
@@ -355,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/report":
             try:
                 return self._send_json(200, report_cached())
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self._send_error(500, "report_failed", str(e))
 
         if path == "/api/ping":
@@ -378,7 +392,7 @@ class Handler(BaseHTTPRequestHandler):
                 invalidate_today_cache()
             try:
                 data = today_cached()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self._send_error(500, "aggregator_failed", str(e))
             body = json.dumps(data).encode("utf-8")
             etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
@@ -399,13 +413,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/range":
             try:
                 return self._send_json(200, _range_payload(qs))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self._send_error(500, "range_failed", str(e))
 
         if path == "/api/budgets":
             try:
                 return self._send_json(200, _budgets_payload())
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self._send_error(500, "budgets_failed", str(e))
 
         if path == "/api/prefs":
@@ -428,7 +442,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/config":
             body = self._read_json_body()
-            unknown = [k for k in body.keys() if k not in _ALLOWED_KEYS]
+            unknown = [k for k in body if k not in _ALLOWED_KEYS]
             if unknown:
                 return self._send_error(
                     400, "unknown_keys",
@@ -445,7 +459,13 @@ class Handler(BaseHTTPRequestHandler):
             key = (body.get("key") or "").strip()
             if not key:
                 return self._send_error(400, "missing_key", "key required")
-            ok, msg = p_anthropic_api.test_connection(key)
+            provider = (body.get("provider") or "anthropic_api").strip()
+            if provider == "openrouter":
+                ok, msg = p_openrouter.test_connection(key)
+            elif provider == "openai":
+                ok, msg = p_openai.test_connection(key)
+            else:
+                ok, msg = p_anthropic_api.test_connection(key)
             return self._send_json(200, {"ok": ok, "message": msg})
 
         if path == "/api/config/import":
@@ -476,8 +496,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_error(400, "invalid_value", str(e))
             if "ui.start_on_login" in applied:
                 v = bool(applied["ui.start_on_login"])
-                bat = str(Path(__file__).resolve().parent.parent / "run.bat")
-                config.apply_startup_setting(v, bat if v else None)
+                config.apply_startup_setting(v, _startup_command_target() if v else None)
             invalidate_today_cache()
             return self._send_json(200, {"applied": applied,
                                           "prefs": _prefs_payload()["prefs"]})
@@ -501,8 +520,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_error(
                     409, "not_frozen",
                     "auto-update is only available in the installed build")
-            st = updater.cached_status()
-            if not st or not st.get("available"):
+            cst = updater.cached_status()
+            if not cst or not cst.get("available"):
                 return self._send_error(409, "no_update", "no update available")
             self._send_json(200, {"ok": True, "message": "update starting…"})
             # Reuse the quit hook: download_and_apply launches the installer then
@@ -545,7 +564,7 @@ def _build_date() -> str | None:
     try:
         out = subprocess.run(
             ["git", "log", "-1", "--format=%cI"],
-            cwd=str(repo), capture_output=True, text=True, timeout=2,
+            cwd=str(repo), capture_output=True, text=True, timeout=2, check=False,
         )
         if out.returncode == 0 and out.stdout.strip():
             return out.stdout.strip()
@@ -553,8 +572,8 @@ def _build_date() -> str | None:
         pass
     try:
         ts = (Path(__file__).parent / "__init__.py").stat().st_mtime
-        from datetime import datetime, timezone
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
+        from datetime import datetime
+        return datetime.fromtimestamp(ts, tz=UTC).isoformat(timespec="seconds")
     except OSError:
         return None
 
@@ -583,7 +602,7 @@ def _safe_self_test(provider) -> dict:
     """Call a provider's self_test() defensively for /api/diagnostics."""
     try:
         return provider.self_test()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"ok": False, "last_error": f"{type(e).__name__}: {e!s:.120}"}
 
 
@@ -593,7 +612,7 @@ def _diagnostics_payload() -> dict:
         data = today_cached()
         if isinstance(data, dict):
             cache_meta = data.get("cache_meta")
-    except Exception:  # noqa: BLE001
+    except Exception:
         cache_meta = None
 
     return {
@@ -611,6 +630,9 @@ def _diagnostics_payload() -> dict:
             "local": _safe_self_test(p_local),
             "anthropic_api": _safe_self_test(p_anthropic_api),
             "hermes": _safe_self_test(p_hermes_local),
+            "opencode": _safe_self_test(p_opencode),
+            "openrouter": _safe_self_test(p_openrouter),
+            "openai": _safe_self_test(p_openai),
         },
         "today_cache": {
             "has_data": _today_cache["data"] is not None,
@@ -634,19 +656,36 @@ def _update_status_payload() -> dict:
 
 
 def _public_config() -> dict:
-    """Config view safe to send to the UI: never the admin key plaintext."""
+    """Config view safe to send to the UI: never key plaintext."""
     cfg = config.load()
-    key = config.get_admin_key() or ""
+    def source_block(name: str) -> dict:
+        src = cfg.get("sources", {}).get(name, {})
+        return {k: v for k, v in src.items() if not str(k).endswith("_enc")}
+
+    anthropic_key = config.get_admin_key() or ""
+    or_key = config.get_source_key("openrouter") or ""
+    oa_key = config.get_source_key("openai") or ""
     return {
         "schema_version": cfg.get("schema_version", 1),
         "sources": {
-            "local": cfg.get("sources", {}).get("local", {}),
+            "local": source_block("local"),
             "anthropic_api": {
-                "enabled": cfg.get("sources", {}).get("anthropic_api", {}).get("enabled", False),
-                "has_key": bool(key),
-                "key_fingerprint": _fingerprint(key) if key else None,
+                **source_block("anthropic_api"),
+                "has_key": bool(anthropic_key),
+                "key_fingerprint": _fingerprint(anthropic_key) if anthropic_key else None,
             },
-            "hermes": cfg.get("sources", {}).get("hermes", {}),
+            "hermes": source_block("hermes"),
+            "opencode": source_block("opencode"),
+            "openrouter": {
+                **source_block("openrouter"),
+                "has_key": bool(or_key),
+                "key_fingerprint": _fingerprint(or_key) if or_key else None,
+            },
+            "openai": {
+                **source_block("openai"),
+                "has_key": bool(oa_key),
+                "key_fingerprint": _fingerprint(oa_key) if oa_key else None,
+            },
         },
         "ui": cfg.get("ui", {}),
     }
@@ -667,28 +706,43 @@ def _export_config() -> dict:
 def _import_config(payload: dict) -> None:
     """Replace config from an exported payload. Rejects plaintext keys."""
     if not isinstance(payload, dict):
-        raise ValueError("payload must be an object")
-    # Disallow any plaintext key smuggling.
-    src = (payload.get("sources") or {}).get("anthropic_api") or {}
-    if isinstance(src, dict):
-        for forbidden in ("admin_key", "anthropic_api_key", "key", "api_key"):
-            if forbidden in src and src[forbidden]:
-                raise ValueError(f"plaintext keys not accepted (got '{forbidden}')")
-    # Preserve existing encrypted key; never read it from the import payload.
+        # ValueError (not TypeError): the /api/config/import route maps
+        # ValueError → HTTP 400.
+        raise ValueError("payload must be an object")  # noqa: TRY004
+    # Disallow any plaintext key smuggling (any source, any field name).
+    srcs = payload.get("sources")
+    if isinstance(srcs, dict):
+        for src in srcs.values():
+            if not isinstance(src, dict):
+                continue
+            for forbidden in ("admin_key", "anthropic_api_key", "key",
+                              "api_key", "openrouter_api_key", "openai_api_key"):
+                if src.get(forbidden):
+                    raise ValueError(
+                        f"plaintext keys not accepted (got '{forbidden}')")
+
+    # Preserve existing encrypted keys; never read key blobs from the import.
     current = config.load()
-    preserved_enc = (
-        current.get("sources", {}).get("anthropic_api", {}).get("admin_key_enc", "")
-    )
+    preserved: dict[str, str] = {}
+    for name, src in (current.get("sources") or {}).items():
+        if isinstance(src, dict) and src.get("key_enc"):
+            preserved[name] = src["key_enc"]
+    admin_enc = (current.get("sources", {}).get("anthropic_api", {})
+                 .get("admin_key_enc", ""))
 
     incoming = json.loads(json.dumps(payload))  # deep copy
-    src2 = incoming.setdefault("sources", {}).setdefault("anthropic_api", {})
-    # Strip any incoming admin_key_enc; only the existing one is honored.
-    src2.pop("admin_key_enc", None)
-    src2.pop("key_fingerprint", None)
-    src2["admin_key_enc"] = preserved_enc
+    incoming_srcs = incoming.setdefault("sources", {})
+    # Strip any incoming key material, then restore the local secrets.
+    for src in incoming_srcs.values():
+        if isinstance(src, dict):
+            for k in [k for k in src if str(k).endswith(("_enc", "fingerprint"))]:
+                src.pop(k, None)
+    for name, enc in preserved.items():
+        incoming_srcs.setdefault(name, {})["key_enc"] = enc
+    incoming_srcs.setdefault("anthropic_api", {})["admin_key_enc"] = admin_enc
 
     # Merge atop defaults to fill in anything missing, then save.
-    from .config import _merge_defaults, _migrate  # type: ignore
+    from .config import _merge_defaults, _migrate
     merged = _merge_defaults(_migrate(incoming))
     config.save(merged)
     invalidate_today_cache()
@@ -704,20 +758,34 @@ def _fingerprint(key: str) -> str:
 
 
 def _apply_config_patch(body: dict) -> None:
-    """Apply a partial config update. Supports admin key + toggles."""
-    if "anthropic_api_key" in body:
-        v = body["anthropic_api_key"]
-        if v is None or v == "":
-            config.set_admin_key(None)
-        else:
-            if not isinstance(v, str):
-                raise ValueError("anthropic_api_key must be a string")
-            ok = config.set_admin_key(v.strip())
-            if not ok:
-                raise ValueError("failed to encrypt and store key")
+    """Apply a partial config update. Supports source keys + toggles."""
+    key_fields = {
+        "anthropic_api_key": config.set_admin_key,
+        "openrouter_api_key": lambda v: config.set_source_key("openrouter", v),
+        "openai_api_key": lambda v: config.set_source_key("openai", v),
+    }
+    for field, setter in key_fields.items():
+        if field in body:
+            v = body[field]
+            if v is None or v == "":
+                setter(None)
+            else:
+                if not isinstance(v, str):
+                    raise ValueError(f"{field} must be a string")
+                ok = setter(v.strip())
+                if not ok:
+                    raise ValueError(f"failed to encrypt and store key ({field})")
 
     if "anthropic_api_enabled" in body:
         config.set_anthropic_enabled(bool(body["anthropic_api_enabled"]))
+
+    if "openrouter_api_enabled" in body:
+        config.set_pref("sources.openrouter.enabled",
+                        bool(body["openrouter_api_enabled"]))
+
+    if "openai_api_enabled" in body:
+        config.set_pref("sources.openai.enabled",
+                        bool(body["openai_api_enabled"]))
 
     if "pinned" in body:
         config.set_pinned(bool(body["pinned"]))
@@ -725,13 +793,26 @@ def _apply_config_patch(body: dict) -> None:
     if "start_on_login" in body:
         v = bool(body["start_on_login"])
         config.set_start_on_login(v)
-        bat = str(Path(__file__).resolve().parent.parent / "run.bat")
-        config.apply_startup_setting(v, bat if v else None)
+        config.apply_startup_setting(v, _startup_command_target() if v else None)
 
     invalidate_today_cache()
 
 
 # ---------- path opener (sandboxed to home dir) ----------
+
+def _startup_command_target() -> str | None:
+    """What the HKCU Run entry should point at.
+
+    Installed (frozen) builds: the exe itself — the old run.bat path resolved
+    to ``_internal\\run.bat`` under the PyInstaller 6 layout, so the registry
+    value pointed at a file that didn't exist and start-on-login silently
+    failed. Source checkouts: run.bat next to the package, if present.
+    """
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    bat = Path(__file__).resolve().parent.parent / "run.bat"
+    return str(bat) if bat.exists() else None
+
 
 def _range_payload(qs: dict) -> dict:
     """Build a /api/range response using user range prefs as defaults."""
@@ -770,13 +851,23 @@ def _budgets_payload() -> dict:
 
 
 def _prefs_payload() -> dict:
-    """Return mutable preferences (no admin key plaintext)."""
+    """Return mutable preferences (no key material of any kind)."""
     cfg = config.load()
     public = json.loads(json.dumps(cfg))
-    # never expose the encrypted blob
-    if "sources" in public and "anthropic_api" in public["sources"]:
-        public["sources"]["anthropic_api"].pop("admin_key_enc", None)
-        public["sources"]["anthropic_api"]["has_key"] = config.has_admin_key()
+    # never expose encrypted blobs from any source
+    for src in (public.get("sources") or {}).values():
+        if isinstance(src, dict):
+            for k in [k for k in src if str(k).endswith("_enc")]:
+                src.pop(k, None)
+    anthropic = (public.get("sources") or {}).get("anthropic_api")
+    if isinstance(anthropic, dict):
+        anthropic["has_key"] = config.has_admin_key()
+    openrouter = (public.get("sources") or {}).get("openrouter")
+    if isinstance(openrouter, dict):
+        openrouter["has_key"] = config.get_source_key("openrouter") is not None
+    openai = (public.get("sources") or {}).get("openai")
+    if isinstance(openai, dict):
+        openai["has_key"] = config.get_source_key("openai") is not None
     return {"prefs": public, "schema_version": cfg.get("schema_version", 1)}
 
 
@@ -833,7 +924,7 @@ def open_report_in_browser() -> bool:
     url = f"http://127.0.0.1:{_HTTP_PORT}/report"
     try:
         return webbrowser.open(url)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 

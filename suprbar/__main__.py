@@ -106,10 +106,11 @@ def main() -> int:
     threading.Thread(target=updater.cleanup_stale_downloads, daemon=True,
                      name="suprbar-upd-cleanup").start()
 
-    # One-time update check at launch (if enabled).
-    if config.get_pref("updates.check_on_launch", True):
-        threading.Thread(target=updater.check_for_update, daemon=True,
-                         name="suprbar-upd-check").start()
+    # NOTE: the once-per-launch update check lives in tray.run() (gated on
+    # updates.check_on_launch AND updater.is_updatable(), so source checkouts
+    # never phone home). Don't add a second check here — that caused double
+    # GitHub hits and duplicate notifications on installed builds.
+    # The 6-hour periodic check below is the long-running-process safety net.
 
     # Periodic update check (every 6 hours) — so long-running suprbar processes
     # don't miss releases. First check after 6h to avoid stacking on the launch

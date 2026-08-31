@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-import time
 
 import pystray
 from PIL import Image, ImageDraw, ImageFont
@@ -41,6 +40,7 @@ def _gradient_image(size: int, palette: str = "default") -> Image.Image:
     else:
         a, v = (91, 143, 232), (122, 108, 240)   # indigo (#5b8fe8 → #7a6cf0)
     px = img.load()
+    assert px is not None  # Pillow stubs type load() Optional; it never is
     denom = 2 * (size - 1) if size > 1 else 1
     for y in range(size):
         for x in range(size):
@@ -52,7 +52,7 @@ def _gradient_image(size: int, palette: str = "default") -> Image.Image:
     return img
 
 
-def _load_bold_font(size: int) -> ImageFont.ImageFont:
+def _load_bold_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """Prefer Segoe UI Black, then Segoe UI Bold (italic backup), then Arial."""
     for candidate in ("seguibl.ttf", "segoeuib.ttf",
                       "segoeuiz.ttf",  # Segoe UI Bold Italic
@@ -80,20 +80,13 @@ def _draw_S(bg: Image.Image, brighter: bool = False) -> Image.Image:
     overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     od = ImageDraw.Draw(overlay)
     text = "S"
-    try:
-        bbox = od.textbbox((0, 0), text, font=font)
-    except AttributeError:
-        # Older Pillow fallback path
-        try:
-            tw, th = od.textsize(text, font=font)
-            bbox = (0, 0, tw, th)
-        except Exception:
-            bbox = (0, 0, size // 2, size // 2)
+    # textbbox exists in every Pillow this app supports (>= 10).
+    bbox = od.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     tx = (size - tw) // 2 - bbox[0]
     ty = (size - th) // 2 - bbox[1] - int(size * 0.035)
-    fill = (255, 255, 255, 255) if not brighter else (255, 255, 255, 255)
+    fill = (255, 255, 255, 255)
     od.text((tx, ty), text, font=font, fill=fill)
 
     bg = Image.alpha_composite(bg, overlay)
@@ -145,7 +138,7 @@ def _render(live: bool = False, brighter: bool = False,
         bg = _add_live_dot(bg)
     if brighter:
         bg = _brighten(bg, 1.18)
-    bg.thumbnail((target_size, target_size), Image.LANCZOS)
+    bg.thumbnail((target_size, target_size), Image.Resampling.LANCZOS)
     return bg
 
 

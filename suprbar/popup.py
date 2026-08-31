@@ -28,7 +28,7 @@ import threading
 import time
 from ctypes import wintypes
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 import webview
 
@@ -185,7 +185,7 @@ def _work_area() -> tuple[int, int, int, int]:
 
 def _bottom_right_xy() -> tuple[int, int]:
     """Default popup position: bottom-right of the monitor under the cursor."""
-    l, t, r, b = _work_area()
+    _l, _t, r, b = _work_area()
     return (r - WIN_W - MARGIN_RIGHT, b - WIN_H - MARGIN_BOTTOM)
 
 
@@ -199,10 +199,8 @@ def _clamp_to_work_area(x: int, y: int,
     max_y = b - WIN_H - 1
     min_x = l
     min_y = t
-    if max_x < min_x:
-        max_x = min_x
-    if max_y < min_y:
-        max_y = min_y
+    max_x = max(max_x, min_x)
+    max_y = max(max_y, min_y)
     return (max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
 
 
@@ -614,7 +612,7 @@ class JsApi:
 # ---------- Window creation ----------
 
 def build_window(url: str, bridge: TrayBridge) -> webview.Window:
-    global WIN_W, WIN_H  # noqa: PLW0603
+    global WIN_W, WIN_H
     # Resolve user prefs for window sizing / placement.
     try:
         from . import config as _cfg
@@ -644,6 +642,9 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         minimized=False,
         js_api=JsApi(bridge),
     )
+    # pywebview's stubs type create_window() as Optional; it always returns a
+    # Window in practice — assert once so the narrowing below type-checks.
+    assert w is not None
     bridge.attach_window(w)
 
     def on_loaded():

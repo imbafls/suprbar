@@ -14,9 +14,15 @@ import os
 import shutil
 import sys
 import threading
-from ctypes import wintypes
 from pathlib import Path
 from typing import Any
+
+# wintypes is Windows-only at import time on some runners; the DPAPI helpers
+# below are win32-gated, so a missing wintypes must not break module import.
+try:
+    from ctypes import wintypes
+except (ImportError, ValueError):  # pragma: no cover - non-Windows runners
+    wintypes = None  # type: ignore[assignment]
 
 log = logging.getLogger("suprbar.config")
 
@@ -46,6 +52,15 @@ DEFAULTS: dict[str, Any] = {
             "admin_key_enc": "",        # DPAPI-encrypted blob (base64)
         },
         "hermes": {"enabled": True},    # Hermes agent sessions.json
+        "opencode": {"enabled": True},  # opencode SQLite sessions
+        "openrouter": {                 # OpenRouter account usage (optional)
+            "enabled": False,
+            "key_enc": "",              # DPAPI-encrypted blob (base64)
+        },
+        "openai": {                     # OpenAI org costs via admin key (optional)
+            "enabled": False,
+            "key_enc": "",              # DPAPI-encrypted blob (base64)
+        },
     },
 
     # ---- Tray + startup ----
@@ -135,8 +150,10 @@ _cache: dict[str, Any] | None = None
 
 # ---------- DPAPI ----------
 
-class _DATA_BLOB(ctypes.Structure):
-    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+if wintypes is not None:  # Windows-only; the helpers below never run elsewhere
+
+    class _DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
 
 
 def _dpapi_protect(plaintext: bytes) -> bytes | None:
@@ -414,6 +431,9 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     "sources.local.enabled":               ("bool", None),
     "sources.anthropic_api.enabled":       ("bool", None),
     "sources.hermes.enabled":              ("bool", None),
+    "sources.opencode.enabled":            ("bool", None),
+    "sources.openrouter.enabled":          ("bool", None),
+    "sources.openai.enabled":              ("bool", None),
 }
 
 
@@ -529,6 +549,41 @@ def set_anthropic_enabled(enabled: bool) -> None:
 
 def has_admin_key() -> bool:
     return get_admin_key() is not None
+
+
+def get_source_key(source: str) -> str | None:
+    """Read a DPAPI-encrypted source key (``sources.<source>.key_enc``)."""
+    cfg = load()
+    enc = cfg.get("sources", {}).get(source, {}).get("key_enc", "")
+    if not enc:
+        return None
+    try:
+        ct = base64.b64decode(enc)
+    except ValueError:
+        return None
+    pt = _dpapi_unprotect(ct)
+    if pt is None:
+        return None
+    try:
+        return pt.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def set_source_key(source: str, plaintext: str | None) -> bool:
+    """Encrypt + store a source key. Empty/None clears it."""
+    cfg = load()
+    src = cfg.setdefault("sources", {}).setdefault(source, {})
+    if not plaintext:
+        src["key_enc"] = ""
+        save(cfg)
+        return True
+    ct = _dpapi_protect(plaintext.encode("utf-8"))
+    if ct is None:
+        return False
+    src["key_enc"] = base64.b64encode(ct).decode("ascii")
+    save(cfg)
+    return True
 
 
 def anthropic_enabled() -> bool:
