@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>supr.bar mini</title>
+  <!-- Reuse the flyout token system; mini.css only adds the chip layout. -->
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/mini.css" />
+</head>
+<body class="mini loading">
+  <span class="pip" id="pip" aria-hidden="true"></span>
+  <button class="open" id="openZone" type="button"
+          title="Open supr.bar" aria-label="Open supr.bar">
+    <span class="cost" id="mCost">$0.00</span>
+    <span class="burn" id="mBurn" hidden></span>
+  </button>
+  <button class="x" id="closeBtn" type="button"
+          title="Hide overlay" aria-label="Hide overlay">&#215;</button>
+  <script src="/mini.js"></script>
+</body>
+</html>

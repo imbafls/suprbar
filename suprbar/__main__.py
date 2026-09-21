@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 
-from . import config, server, updater
+from . import config, pricing, server, updater
 from .popup import (
     TrayBridge,
     acquire_single_instance,
@@ -72,6 +72,13 @@ def setup_logging() -> None:
 def main() -> int:
     setup_logging()
     log = logging.getLogger("suprbar")
+
+    # Apply pricing overrides (local file now, hosted table in the background)
+    # so first scans already use the freshest rates. Best-effort only.
+    try:
+        pricing.init_pricing()
+    except Exception:
+        log.debug("pricing init failed", exc_info=True)
 
     # Single-instance guard (Windows named mutex; a no-op on other platforms).
     # Acquire before binding a port or spawning threads so a duplicate launch

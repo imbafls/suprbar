@@ -51,6 +51,7 @@ _cache_date: str | None = None
 _last_scan_meta: dict[str, int] = {
     "files_reused": 0,
     "files_reparsed": 0,
+    "files_tailed": 0,
     "last_scan_ms": 0,
     "parse_errors": 0,
 }
@@ -155,117 +156,159 @@ def _live_session_payload(s: dict, now: datetime) -> dict[str, Any]:
 
 # ---------- per-file scan worker ----------
 
-def _scan_one_file(path: Path, midnight_utc: datetime) -> dict[str, Any]:
-    """Parse one JSONL and produce a partial aggregate for today.
+# A full parse and an incremental tail share the same accumulator shape; the
+# tail seeds it from the cached result, so the fold logic below works for both.
+_LINE_CHUNK = 1 << 20  # 1 MiB binary read chunks (bounded memory on huge files)
 
-    Returns a dict with everything ``today_summary`` needs from this file:
-    today_totals, session summary, model/hour/project breakdowns, parse
-    errors. Pure function — safe to run in a thread.
-    """
-    sess_first_ts: datetime | None = None
-    sess_last_ts: datetime | None = None
-    sess_first_ts_today: datetime | None = None
-    sess_model: str | None = None
-    sess_cost_today = 0.0
-    sess_msgs_today = 0
-    sess_today_fields = _zero_bucket()
-    sess_id_in_file: str | None = None
 
-    today_totals = _zero_bucket()
-    # 24-element hourly cost/token totals (local-hour from each event ts).
-    hourly = [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
-              for h in range(24)]
-    # model_id -> {cost, messages, tokens, cache_read}
-    by_model: dict[str, dict[str, float]] = defaultdict(
-        lambda: {"cost": 0.0, "messages": 0, "tokens": 0, "cache_read": 0})
-
-    parse_errors = 0
-
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line:
-                    continue
-                # Cheap pre-filter — usage-bearing records always contain
-                # the literal "usage" key. Saves a json.loads on most
-                # lines (which are tool calls / user messages).
-                has_usage_key = '"usage"' in line
-                if not has_usage_key and '"sessionId"' not in line \
-                        and '"timestamp"' not in line:
-                    # nothing we care about
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    parse_errors += 1
-                    continue
-                dt = _parse_ts(rec.get("timestamp"))
-                if dt is None:
-                    continue
-                if sess_first_ts is None or dt < sess_first_ts:
-                    sess_first_ts = dt
-                if sess_last_ts is None or dt > sess_last_ts:
-                    sess_last_ts = dt
-                if dt >= midnight_utc and (sess_first_ts_today is None
-                                           or dt < sess_first_ts_today):
-                    sess_first_ts_today = dt
-                sid_in_rec = rec.get("sessionId")
-                if sid_in_rec and not sess_id_in_file:
-                    sess_id_in_file = sid_in_rec
-
-                if not has_usage_key:
-                    continue
-                msg = rec.get("message") or {}
-                usage = msg.get("usage")
-                if not usage:
-                    continue
-                if dt < midnight_utc:
-                    continue
-                model = msg.get("model") or ""
-                fields = _extract_usage_fields(usage, model)
-                _add(today_totals, fields)
-                _add(sess_today_fields, fields)
-                sess_cost_today += fields["cost"]
-                sess_msgs_today += 1
-                if model:
-                    sess_model = model
-                    by_model[model]["cost"] += fields["cost"]
-                    by_model[model]["messages"] += 1
-                    by_model[model]["cache_read"] += fields["cache_read"]
-                    by_model[model]["tokens"] += (
-                        fields["input"] + fields["output"]
-                        + fields["cache_5m"] + fields["cache_1h"]
-                        + fields["cache_read"]
-                    )
-                # local hour bucket
-                local_dt = dt.astimezone()
-                h = local_dt.hour
-                hourly[h]["cost"] += fields["cost"]
-                hourly[h]["tokens"] += (
-                    fields["input"] + fields["output"]
-                    + fields["cache_5m"] + fields["cache_1h"]
-                    + fields["cache_read"]
-                )
-                hourly[h]["messages"] += 1
-    except OSError:
-        return {"ok": False, "parse_errors": parse_errors}
-
+def _empty_acc() -> dict[str, Any]:
     return {
-        "ok": True,
-        "parse_errors": parse_errors,
-        "today_totals": today_totals,
-        "hourly": hourly,
-        "by_model": dict(by_model),
-        "sess_first_ts": sess_first_ts,
-        "sess_last_ts": sess_last_ts,
-        "sess_first_ts_today": sess_first_ts_today,
-        "sess_model": sess_model,
-        "sess_cost_today": sess_cost_today,
-        "sess_msgs_today": sess_msgs_today,
-        "sess_today_fields": sess_today_fields,
-        "sess_id_in_file": sess_id_in_file,
+        "sess_first_ts": None,
+        "sess_last_ts": None,
+        "sess_first_ts_today": None,
+        "sess_model": None,
+        "sess_cost_today": 0.0,
+        "sess_msgs_today": 0,
+        "sess_today_fields": _zero_bucket(),
+        "sess_id_in_file": None,
+        "today_totals": _zero_bucket(),
+        "hourly": [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
+                   for h in range(24)],
+        "by_model": {},
+        "parse_errors": 0,
     }
+
+
+def _acc_from_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Seed an accumulator from a previous result to continue appending."""
+    acc = _empty_acc()
+    acc["sess_first_ts"] = result.get("sess_first_ts")
+    acc["sess_last_ts"] = result.get("sess_last_ts")
+    acc["sess_first_ts_today"] = result.get("sess_first_ts_today")
+    acc["sess_model"] = result.get("sess_model")
+    acc["sess_cost_today"] = float(result.get("sess_cost_today", 0.0) or 0.0)
+    acc["sess_msgs_today"] = int(result.get("sess_msgs_today", 0) or 0)
+    acc["sess_id_in_file"] = result.get("sess_id_in_file")
+    acc["parse_errors"] = int(result.get("parse_errors", 0) or 0)
+    acc["today_totals"] = dict(result.get("today_totals") or _zero_bucket())
+    acc["sess_today_fields"] = dict(
+        result.get("sess_today_fields") or _zero_bucket())
+    hourly = result.get("hourly") or []
+    if len(hourly) == 24:
+        acc["hourly"] = [dict(h) for h in hourly]
+    by_model = result.get("by_model") or {}
+    acc["by_model"] = {m: dict(v) for m, v in by_model.items()}
+    return acc
+
+
+def _fold_lines(lines, midnight_utc: datetime, acc: dict[str, Any]) -> None:
+    """Fold JSONL text lines into *acc* (mutates it). Shared by full + tail."""
+    by_model: dict[str, dict[str, float]] = acc["by_model"]
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        # Cheap pre-filter — usage-bearing records always contain the literal
+        # "usage" key. Saves a json.loads on most lines (tool calls / user
+        # messages).
+        has_usage_key = '"usage"' in line
+        if not has_usage_key and '"sessionId"' not in line \
+                and '"timestamp"' not in line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            acc["parse_errors"] += 1
+            continue
+        dt = _parse_ts(rec.get("timestamp"))
+        if dt is None:
+            continue
+        if acc["sess_first_ts"] is None or dt < acc["sess_first_ts"]:
+            acc["sess_first_ts"] = dt
+        if acc["sess_last_ts"] is None or dt > acc["sess_last_ts"]:
+            acc["sess_last_ts"] = dt
+        if dt >= midnight_utc and (acc["sess_first_ts_today"] is None
+                                   or dt < acc["sess_first_ts_today"]):
+            acc["sess_first_ts_today"] = dt
+        sid_in_rec = rec.get("sessionId")
+        if sid_in_rec and not acc["sess_id_in_file"]:
+            acc["sess_id_in_file"] = sid_in_rec
+
+        if not has_usage_key:
+            continue
+        msg = rec.get("message") or {}
+        usage = msg.get("usage")
+        if not usage:
+            continue
+        if dt < midnight_utc:
+            continue
+        model = msg.get("model") or ""
+        fields = _extract_usage_fields(usage, model)
+        _add(acc["today_totals"], fields)
+        _add(acc["sess_today_fields"], fields)
+        acc["sess_cost_today"] += fields["cost"]
+        acc["sess_msgs_today"] += 1
+        if model:
+            acc["sess_model"] = model
+            agg = by_model.get(model)
+            if agg is None:
+                agg = {"cost": 0.0, "messages": 0, "tokens": 0, "cache_read": 0}
+                by_model[model] = agg
+            agg["cost"] += fields["cost"]
+            agg["messages"] += 1
+            agg["cache_read"] += fields["cache_read"]
+            agg["tokens"] += (
+                fields["input"] + fields["output"]
+                + fields["cache_5m"] + fields["cache_1h"]
+                + fields["cache_read"]
+            )
+        # local hour bucket
+        hourly = acc["hourly"]
+        h = dt.astimezone().hour
+        hourly[h]["cost"] += fields["cost"]
+        hourly[h]["tokens"] += (
+            fields["input"] + fields["output"]
+            + fields["cache_5m"] + fields["cache_1h"]
+            + fields["cache_read"]
+        )
+        hourly[h]["messages"] += 1
+
+
+def _scan_one_file(path: Path, midnight_utc: datetime,
+                   start_offset: int = 0,
+                   base: dict[str, Any] | None = None) -> tuple[dict[str, Any], int]:
+    """Parse one JSONL (from ``start_offset``, or the whole file) for today.
+
+    Streaming binary read: memory stays bounded on huge sessions and we get an
+    exact byte offset back. The offset excludes a trailing partial line (a
+    half-written append) so the next pass re-reads it intact.
+
+    Returns ``(result, end_offset)``. ``result`` carries everything
+    ``today_summary`` needs from this file. Pure function — thread-safe.
+    """
+    acc = _acc_from_result(base) if base else _empty_acc()
+    total = max(0, int(start_offset))
+    buf = b""
+    try:
+        with open(path, "rb") as f:
+            if total:
+                f.seek(total)
+            while True:
+                chunk = f.read(_LINE_CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                buf += chunk
+                parts = buf.split(b"\n")
+                buf = parts.pop()
+                if parts:
+                    _fold_lines((p.decode("utf-8", "ignore") for p in parts),
+                                midnight_utc, acc)
+    except OSError:
+        return {"ok": False, "parse_errors": acc["parse_errors"]}, start_offset
+
+    acc["ok"] = True
+    return acc, total - len(buf)
 
 
 def _reset_cache_if_date_rolled(today_iso: str) -> None:
@@ -309,6 +352,7 @@ def today_summary() -> dict[str, Any]:
     files_scanned = 0
     files_reused = 0
     files_reparsed = 0
+    files_tailed = 0
     parse_errors_total = 0
     last_file_seen_ts: float = 0.0
 
@@ -329,7 +373,7 @@ def today_summary() -> dict[str, Any]:
     with _scan_lock:
         _reset_cache_if_date_rolled(today.isoformat())
 
-    candidates: list[tuple[Path, float, int, dict | None]] = []
+    candidates: list[tuple[Path, float, int, dict | None, bool]] = []
     for path in CLAUDE_HOME.rglob("*.jsonl"):
         proj_name = _project_name(path)
         if _allow and proj_name not in _allow:
@@ -344,40 +388,58 @@ def today_summary() -> dict[str, Any]:
         last_file_seen_ts = max(last_file_seen_ts, st.st_mtime)
         key = str(path)
         cached = _file_cache.get(key)
-        if cached and cached.get("mtime") == st.st_mtime \
-                and cached.get("size") == st.st_size:
-            candidates.append((path, st.st_mtime, st.st_size, cached["result"]))
-        else:
-            candidates.append((path, st.st_mtime, st.st_size, None))
+        fresh = bool(cached and cached.get("mtime") == st.st_mtime
+                     and cached.get("size") == st.st_size)
+        candidates.append((path, st.st_mtime, st.st_size, cached, fresh))
 
     # Parse anything without a fresh cache hit in a small thread pool.
-    to_parse = [(p, m, sz) for (p, m, sz, c) in candidates if c is None]
-    parsed_results: dict[str, dict[str, Any]] = {}
+    # Files that only grew since their last parse get a tail read from the
+    # stored byte offset (O(new bytes) instead of O(file)) — the common case
+    # while a session is actively appending. Everything else is a full parse.
+    to_parse = [(p, m, sz, c) for (p, m, sz, c, f) in candidates if not f]
+    parsed_results: dict[str, tuple[dict[str, Any], int]] = {}
+    tail_keys: set[str] = set()
     if to_parse:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
-            futs = {ex.submit(_scan_one_file, p, midnight_utc): (p, m, sz)
-                    for (p, m, sz) in to_parse}
-            for fut, (p, _m, _sz) in futs.items():
+            futs = {}
+            for (p, _m, sz, cached_entry) in to_parse:
+                start = 0
+                base = None
+                if cached_entry:
+                    prev_off = int(cached_entry.get("end_offset", 0) or 0)
+                    if prev_off and sz > prev_off:
+                        start = prev_off
+                        base = cached_entry.get("result")
+                        tail_keys.add(str(p))
+                futs[ex.submit(_scan_one_file, p, midnight_utc,
+                               start, base)] = p
+            for fut, p in futs.items():
                 try:
                     parsed_results[str(p)] = fut.result()
                 except Exception:
-                    parsed_results[str(p)] = {"ok": False, "parse_errors": 0}
+                    parsed_results[str(p)] = (
+                        {"ok": False, "parse_errors": 0}, 0)
 
     # Walk candidates in order, attaching the freshly-parsed result where
     # needed, and update the cache atomically.
     with _scan_lock:
-        for (path, mtime, size, cached_result) in candidates:
+        for (path, mtime, size, cached, fresh) in candidates:
             key = str(path)
-            if cached_result is not None:
+            if fresh and cached:
                 files_reused += 1
-                result = cached_result
+                result = cached["result"]
+                end_offset = int(cached.get("end_offset", size) or size)
             else:
-                result = parsed_results.get(key, {"ok": False,
-                                                  "parse_errors": 0})
+                result, end_offset = parsed_results.get(
+                    key, ({"ok": False, "parse_errors": 0}, 0))
                 files_reparsed += 1
+                if key in tail_keys:
+                    files_tailed += 1
                 if result.get("ok"):
                     _file_cache[key] = {
-                        "mtime": mtime, "size": size, "result": result,
+                        "mtime": mtime, "size": size,
+                        "end_offset": end_offset,
+                        "result": result,
                         "today_date": today.isoformat(),
                     }
 
@@ -491,6 +553,7 @@ def today_summary() -> dict[str, Any]:
     with _scan_lock:
         _last_scan_meta["files_reused"] = files_reused
         _last_scan_meta["files_reparsed"] = files_reparsed
+        _last_scan_meta["files_tailed"] = files_tailed
         _last_scan_meta["last_scan_ms"] = elapsed_ms
         _last_scan_meta["parse_errors"] = parse_errors_total
 
@@ -501,6 +564,7 @@ def today_summary() -> dict[str, Any]:
         "files_scanned": files_scanned,
         "files_reused": files_reused,
         "files_reparsed": files_reparsed,
+        "files_tailed": files_tailed,
         "parse_errors": parse_errors_total,
         "today": _serialize(today_totals),
         "active": None,
@@ -556,6 +620,7 @@ def _empty_today(started_at: float, files_scanned: int) -> dict[str, Any]:
         "files_scanned": files_scanned,
         "files_reused": 0,
         "files_reparsed": 0,
+        "files_tailed": 0,
         "parse_errors": 0,
         "today": _serialize(_zero_bucket()),
         "active": None,
@@ -860,10 +925,14 @@ def budgets_summary(daily_limit: float, weekly_limit: float, monthly_limit: floa
                     week_starts_on: str = "mon",
                     allowlist: list[str] | None = None,
                     denylist:  list[str] | None = None,
+                    project_limits: dict[str, float] | None = None,
                     ) -> dict[str, Any]:
     """Return spent vs limit for day/week/month windows.
 
     Useful for budget alerts. Reuses range_summary so all filters apply.
+    ``project_limits`` adds per-project daily windows keyed
+    ``"project:<name>"`` — one runaway repo shouldn't be invisible just
+    because the global cap isn't hit yet.
     """
     today = range_summary("today",
                           allowlist=allowlist, denylist=denylist)
@@ -885,8 +954,17 @@ def budgets_summary(daily_limit: float, weekly_limit: float, monthly_limit: floa
             "remaining": round(max(0.0, limit - spent), 4),
         }
 
-    return {
+    out: dict[str, Any] = {
         "daily":   b(today["totals"]["cost"], daily_limit),
         "weekly":  b(week["totals"]["cost"],  weekly_limit),
         "monthly": b(month["totals"]["cost"], monthly_limit),
     }
+    if project_limits:
+        spent_by_project = {
+            p["project"]: float(p["cost"]) for p in today["by_project"]
+        }
+        for name, limit in project_limits.items():
+            entry = b(spent_by_project.get(name, 0.0), float(limit))
+            entry["project"] = name
+            out[f"project:{name}"] = entry
+    return out

@@ -21,13 +21,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
       - name: Ruff
         run: python -m ruff check suprbar tests
 
       - name: Mypy
         run: python -m mypy suprbar
 
-      - name: Tests
+      - name: Tests (incl. headless UI smoke)
+        run: python -m pytest tests -q
+
+      - name: Pricing self-test
+        run: python -m suprbar.pricing
+
+  # Windows-specific coverage: the tray / DWM / WebView2 code paths never run
+  # on the Ubuntu job, so at least import + unit-test them on the target OS.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest mypy
+
+      - name: Import smoke (tray / popup / mini / server)
+        run: python -c "import suprbar.popup, suprbar.tray, suprbar.mini, suprbar.server, suprbar.scanner; print('imports ok')"
+
+      - name: Ruff
+        run: python -m ruff check suprbar tests
+
+      - name: Mypy
+        run: python -m mypy suprbar
+
+      - name: Tests (UI smoke auto-skips without browsers)
         run: python -m pytest tests -q
 
       - name: Pricing self-test

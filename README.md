@@ -16,9 +16,8 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.13 — glance redesign (daily trend chart, top-model chips,
-> budget ring gauge) on top of v0.12's opencode tracking, per-model costs,
-> OpenRouter + OpenAI all-device actuals, and CI.
+> **Status:** v0.14 — always-on-top **mini overlay**, working click-through,
+> per-project budgets, incremental scan tailing, and daily pricing updates.
 
 ## What it does
 
@@ -28,11 +27,18 @@ No login. No telemetry. Your data stays on your machine.
 - Optional **Anthropic Admin API** for org-wide actual spend (Settings → Sources).
 - Optional **Hermes** agent sessions (`~/.hermes/sessions/sessions.json`).
 - **Range filters** — today, 24h, 7d, week, month, 30d, 90d.
-- **Budgets** — daily / weekly / monthly limits with tray warnings.
+- **Mini overlay** — an always-on-top chip (live dot · today's $ · burn $/h)
+  that hovers over other apps. Click it to open the flyout; drag to move;
+  optionally click-through. Toggle from the tray menu or Settings.
+- **Budgets** — daily / weekly / monthly limits plus **per-project daily
+  caps**, with tray warnings and system notifications when a line is crossed.
 - **Per-source breakdown** — local Claude Code, opencode, Hermes, Admin API
   (more sources planned).
 - Live session indicator, burn rate, cache stats, top projects.
 - **By model** cost breakdown across all sources in the Details fold.
+- **Editable pricing** — override rates locally (`pricing.local.json`) or let
+  supr.bar refresh the hosted rate table daily, so new models price correctly
+  without waiting for a release.
 
 ## Install
 
@@ -57,8 +63,10 @@ Requires Python 3.11+, Windows 11, and WebView2 (preinstalled on Win11).
 1. Launch suprbar — gradient **S** in the system tray.
 2. Open Claude Code and start a session.
 3. Click the tray icon for the flyout (cost, tokens, burn, budgets).
-4. Right-click → **Settings** for refresh, theme, sources, budgets.
-5. Set daily/weekly/monthly limits under **Budgets** if you want warnings.
+4. Right-click → **Mini overlay** for the always-on-top chip.
+5. Right-click → **Settings** for refresh, theme, sources, budgets.
+6. Set daily/weekly/monthly limits under **Budgets** if you want warnings
+   (per-project caps: `project=amount` entries in the same section).
 
 ## Updating
 
@@ -77,10 +85,11 @@ supr.bar updates itself — there's no separate updater to run.
 - **Opt out.** Don't want the launch-time check? Turn off **Settings → Updates →
   Check on launch** (`updates.check_on_launch`). supr.bar then never reaches out
   on its own — manual checks still work.
-- **Local-first, no telemetry.** The only network call is an unauthenticated
-  `GET` for the latest-release version — no account, no token, nothing about you
-  is sent. supr.bar has no server and binds no port; everything stays on your
-  machine.
+- **Local-first, no telemetry.** Two optional unauthenticated `GET`s exist:
+  the latest-release version check, and the hosted pricing table (daily, so new
+  model rates land without a release — clear **Settings → Pricing → URL** to
+  disable it). Neither sends an account, token, or anything about you.
+  supr.bar has no server and binds no port; everything stays on your machine.
 - **Not code-signed (yet).** This build isn't code-signed, so Windows
   **SmartScreen may warn** when the installer runs. That's expected — choose
   **More info → Run anyway**. Running from a source checkout never auto-updates;

@@ -101,8 +101,9 @@ DEFAULTS: dict[str, Any] = {
         "weekly_limit":  0.0,
         "monthly_limit": 0.0,
         "alert_at_pct":  80,           # alert when >= this % of any active limit
-        "notify":        True,         # toast when a budget crosses its threshold
+        "notify":        True,         # notify when a budget crosses its threshold
         "tray_warn_color": True,       # tint tray icon amber/red on warning
+        "project_limits": [],          # per-project daily caps: "project=amount"
     },
 
     # ---- Updates ----
@@ -121,6 +122,19 @@ DEFAULTS: dict[str, Any] = {
         "live_threshold_seconds": 60,  # JSONL mtime within X = "live"
         "confirm_quit":          False,
         "click_through":         False, # popup transparent to clicks
+    },
+
+    # ---- Mini overlay (always-on-top HUD) ----
+    "mini": {
+        "enabled":       False,  # show the mini overlay
+        "show_burn":     True,   # include $/h burn rate in the overlay
+        "click_through": False,  # overlay is transparent to mouse clicks
+    },
+
+    # ---- Pricing ----
+    "pricing": {
+        # Optional URL for a hosted rate table (JSON). Empty = local only.
+        "remote_url": "https://raw.githubusercontent.com/imbafls/suprbar/main/pricing.json",
     },
 
     # ---- Project filters ----
@@ -395,6 +409,7 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     "budgets.alert_at_pct":   ("int", (1, 100)),
     "budgets.notify":         ("bool", None),
     "budgets.tray_warn_color": ("bool", None),
+    "budgets.project_limits":  ("list_str", None),
 
     # behavior
     "behavior.refresh_seconds":      ("int", (0, 3600)),
@@ -404,6 +419,14 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     "behavior.live_threshold_seconds": ("int", (5, 600)),
     "behavior.confirm_quit":         ("bool", None),
     "behavior.click_through":        ("bool", None),
+
+    # mini overlay
+    "mini.enabled":       ("bool", None),
+    "mini.show_burn":     ("bool", None),
+    "mini.click_through": ("bool", None),
+
+    # pricing
+    "pricing.remote_url": ("str", None),
 
     # projects
     "projects.allowlist":     ("list_str", None),
@@ -639,6 +662,56 @@ def project_denylist() -> list[str]:
 
 def anonymize_projects() -> bool:
     return bool(get_pref("projects.anonymize", False))
+
+
+# ---------- Mini overlay accessors ----------
+
+def mini_enabled() -> bool:
+    return bool(get_pref("mini.enabled", False))
+
+
+def mini_show_burn() -> bool:
+    return bool(get_pref("mini.show_burn", True))
+
+
+def mini_click_through() -> bool:
+    return bool(get_pref("mini.click_through", False))
+
+
+def pricing_remote_url() -> str:
+    v = get_pref("pricing.remote_url", "")
+    return v if isinstance(v, str) else ""
+
+
+def project_limit_map() -> dict[str, float]:
+    """Parse budgets.project_limits entries into {project: daily_limit}.
+
+    Accepted forms: ``"project=25"`` or ``"project:25"``. Malformed or
+    non-positive entries are ignored (logged), never fatal.
+    """
+    raw = get_pref("budgets.project_limits", [])
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, float] = {}
+    for entry in raw:
+        s = str(entry).strip()
+        if not s:
+            continue
+        name, sep, amount = s.partition("=")
+        if not sep:
+            name, sep, amount = s.partition(":")
+        name = name.strip()
+        if not name or not sep:
+            log.warning("ignoring project limit %r (want name=amount)", s)
+            continue
+        try:
+            limit = float(amount.strip())
+        except (TypeError, ValueError):
+            log.warning("ignoring project limit %r (bad amount)", s)
+            continue
+        if limit > 0:
+            out[name] = limit
+    return out
 
 
 # ---------- Windows "Run on login" registry helper ----------

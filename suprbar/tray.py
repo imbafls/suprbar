@@ -22,8 +22,10 @@ log = logging.getLogger("suprbar.tray")
 
 # Polling cadence for tooltip + idle/live state. Dropped from 60s -> 30s so
 # the green-dot icon reflects new sessions quickly. We also force-refresh
-# whenever the set of enabled source IDs changes between polls.
+# whenever the set of enabled source IDs changes between polls. With no live
+# session there is nothing to chase, so the loop backs off to IDLE seconds.
 REFRESH_SECONDS = 30
+REFRESH_IDLE_SECONDS = 90
 PULSE_MS = 300
 
 
@@ -225,6 +227,8 @@ class TrayApp:
         self._live_bright = _render(live=True, brighter=True)
         self._pulse_timer: threading.Timer | None = None
         self._last_icon_key: tuple = (False, "default")
+        # window key -> last notified state ("ok" / "warn" / "over")
+        self._budget_alerts: dict[str, str] = {}
 
     # ---- click / menu callbacks ----
 
@@ -333,11 +337,69 @@ class TrayApp:
                 # Surface the change so the user sees what middle-click did.
                 state = "pinned" if new else "unpinned"
                 try:
-                    self._icon.notify("supr.bar", f"Popup {state}")
+                    self._icon.notify(f"Popup {state}", "supr.bar")
                 except Exception:
                     pass
         except Exception:
             log.exception("middle-click toggle failed")
+
+    # ---- mini overlay / click-through menu callbacks ----
+
+    def _on_mini_toggle(self, icon, item):
+        try:
+            mini = self.bridge.mini
+            if mini is None:
+                return
+            enabled = not config.mini_enabled()
+            config.set_pref("mini.enabled", enabled)
+            if enabled:
+                mini.show()
+            else:
+                mini.hide()
+            if self._icon:
+                self._icon.update_menu()
+        except Exception:
+            log.exception("mini toggle failed")
+
+    def _is_mini_enabled(self, item) -> bool:
+        try:
+            return config.mini_enabled()
+        except Exception:
+            return False
+
+    def _on_mini_click_through(self, icon, item):
+        try:
+            config.set_pref("mini.click_through",
+                            not config.mini_click_through())
+            mini = self.bridge.mini
+            if mini:
+                mini.apply_click_through()
+            if self._icon:
+                self._icon.update_menu()
+        except Exception:
+            log.exception("mini click-through toggle failed")
+
+    def _is_mini_click_through(self, item) -> bool:
+        try:
+            return config.mini_click_through()
+        except Exception:
+            return False
+
+    def _on_flyout_click_through(self, icon, item):
+        try:
+            new = not bool(config.get_pref("behavior.click_through", False))
+            config.set_pref("behavior.click_through", new)
+            self.bridge.apply_click_through()
+            if self._icon:
+                self._icon.update_menu()
+        except Exception:
+            log.exception("flyout click-through toggle failed")
+
+    def _is_flyout_click_through(self, item) -> bool:
+        try:
+            return bool(config.get_pref("behavior.click_through", False))
+        except Exception:
+            return False
 
     # ---- icon / tooltip updates ----
 
@@ -374,7 +436,7 @@ class TrayApp:
         self._pulse_timer.daemon = True
         self._pulse_timer.start()
 
-    def _apply_live_state(self, data: dict) -> None:
+    def _apply_live_state(self, data: dict, budgets: dict | None = None) -> None:
         """Swap the tray icon based on (live, budget_alert).
 
         The icon picks a palette: default for normal, warn (amber) when any
@@ -385,7 +447,8 @@ class TrayApp:
         palette = "default"
         try:
             if config.get_pref("budgets.tray_warn_color", True):
-                budgets = self._latest_budgets()
+                if budgets is None:
+                    budgets = self._latest_budgets()
                 if budgets:
                     over = any(b.get("over") for b in budgets.values()
                                if isinstance(b, dict))
@@ -406,10 +469,47 @@ class TrayApp:
         self._last_live = live
         self._last_icon_key = key
 
+    def _notify_budget_crossings(self, budgets: dict | None) -> None:
+        """Native notification when a budget first crosses a threshold.
+
+        Fires from the tray loop (works with the flyout closed), once per
+        state change per window. ``budgets.notify`` gates it.
+        """
+        if not budgets or not self._icon:
+            return
+        try:
+            if not config.get_pref("budgets.notify", True):
+                return
+        except Exception:
+            return
+        labels = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
+        for key, b in budgets.items():
+            if not isinstance(b, dict) or b.get("limit", 0) <= 0:
+                continue
+            state = "over" if b.get("over") else (
+                "warn" if b.get("alerting") else "ok")
+            prev = self._budget_alerts.get(key)
+            self._budget_alerts[key] = state
+            if state == prev or state == "ok":
+                continue
+            label = labels.get(key, f"{b.get('project', key)} (project)")
+            spent, limit = float(b.get("spent", 0)), float(b.get("limit", 0))
+            if state == "over":
+                body = (f"{label} budget exceeded — "
+                        f"${spent:,.2f} / ${limit:,.2f}")
+            else:
+                body = (f"{label} budget at {b.get('pct', 0):.0f}% — "
+                        f"${spent:,.2f} / ${limit:,.2f}")
+            try:
+                self._icon.notify(body, "supr.bar — budget")
+            except Exception:
+                pass
+
     def _latest_budgets(self) -> dict | None:
         """Compute current budget windows once per tooltip refresh.
 
         Uses the scanner directly to avoid an HTTP loop back to ourselves.
+        Includes per-project daily caps (``budgets.project_limits``).
         """
         try:
             from . import scanner as _scn
@@ -418,23 +518,44 @@ class TrayApp:
             d = float(b.get("daily_limit",   0.0) or 0.0)
             w = float(b.get("weekly_limit",  0.0) or 0.0)
             m = float(b.get("monthly_limit", 0.0) or 0.0)
-            if not (d or w or m):
+            project_limits = config.project_limit_map()
+            if not (d or w or m or project_limits):
                 return None
             week_starts = cfg.get("range", {}).get("week_starts_on", "mon")
             alert_pct = int(b.get("alert_at_pct", 80) or 80)
             s = _scn.budgets_summary(d, w, m, week_starts_on=week_starts,
                                      allowlist=config.project_allowlist(),
-                                     denylist=config.project_denylist())
-            for k in ("daily", "weekly", "monthly"):
-                s[k]["alerting"] = s[k]["limit"] > 0 and s[k]["pct"] >= alert_pct
+                                     denylist=config.project_denylist(),
+                                     project_limits=project_limits)
+            for entry in s.values():
+                if isinstance(entry, dict):
+                    entry["alerting"] = entry.get("limit", 0) > 0 \
+                        and entry.get("pct", 0) >= alert_pct
             return s
         except Exception:
             return None
 
+    def _sync_mini(self) -> None:
+        """Keep overlay visibility in step with the persisted pref."""
+        try:
+            mini = self.bridge.mini
+            if mini is None:
+                return
+            if config.mini_enabled():
+                if not mini.is_visible():
+                    mini.show()
+            elif mini.is_visible():
+                mini.hide()
+        except Exception:
+            log.debug("mini sync failed", exc_info=True)
+
     def _update_tooltip(self):
         try:
             data = server.today_cached()
-            self._apply_live_state(data)
+            budgets = self._latest_budgets()
+            self._apply_live_state(data, budgets)
+            self._notify_budget_crossings(budgets)
+            self._sync_mini()
             if self._icon:
                 self._icon.title = _format_tooltip(data)
             # Track active sources so we can force a refresh on change.
@@ -455,7 +576,9 @@ class TrayApp:
     def _refresh_loop(self):
         self._update_tooltip()
         while not self._stop.is_set():
-            if self._stop.wait(REFRESH_SECONDS):
+            # Idle backoff: nothing to chase without a live session.
+            wait_s = REFRESH_SECONDS if self._last_live else REFRESH_IDLE_SECONDS
+            if self._stop.wait(wait_s):
                 return
             # Bust the server-side cache so the next tooltip reflects fresh data.
             server.invalidate_today_cache()
@@ -473,6 +596,13 @@ class TrayApp:
             pystray.MenuItem("30-day report…", self._on_report),
             pystray.MenuItem("Pin (don't auto-hide)", self._on_pin_toggle,
                              checked=self._is_pinned),
+            pystray.MenuItem("Mini overlay", self._on_mini_toggle,
+                             checked=self._is_mini_enabled),
+            pystray.MenuItem("Mini click-through", self._on_mini_click_through,
+                             checked=self._is_mini_click_through,
+                             visible=lambda item: self._is_mini_enabled(item)),
+            pystray.MenuItem("Click-through flyout", self._on_flyout_click_through,
+                             checked=self._is_flyout_click_through),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Settings…", self._on_settings),
             pystray.MenuItem("About supr.bar", self._on_about),

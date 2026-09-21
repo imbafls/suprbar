@@ -1,5 +1,66 @@
 # supr.bar CHANGELOG
 
+## v0.14.0 — mini overlay + click-through, tailed scans, per-project budgets
+
+A quality-of-life release: a tiny always-on-top overlay so the number is
+visible without opening the flyout, plus a batch of under-the-hood upgrades
+that make the app quieter and sharper about money.
+
+### Mini overlay (new)
+- **Always-on-top mini chip** (~176×44) showing the live pip, today's spend,
+  and current burn rate. Hovers over other windows without stealing focus.
+- **Toggle it** from the tray menu (Mini overlay) or Settings → Mini overlay.
+  Drag anywhere to move; it remembers its position and snaps to corners.
+- **Click the cost** to open the full flyout; hover reveals a dismiss button
+  that turns the overlay off for good. `mini.show_burn` hides the rate arm.
+
+### Click-through is real now
+- `behavior.click_through` was exposed in Settings but wired to nothing. It
+  now applies `WS_EX_TRANSPARENT` to the flyout so clicks pass through to the
+  window underneath — turn it back off from the tray icon menu.
+- The overlay has its own `mini.click_through` (same tray escape hatch).
+
+### Scans: incremental tail instead of full reparse
+- An actively-growing session file is no longer re-parsed from byte zero on
+  every poll. The scanner keeps a byte offset per file and reads only the new
+  tail (holding back a half-written trailing line until it completes).
+- New `files_tailed` counter surfaces the saving in diagnostics.
+
+### Budgets
+- **Per-project daily caps** (`budgets.project_limits`, `project=amount`
+  entries) — a runaway repo gets flagged even when the global budget isn't hit.
+- **Budget notifications now fire from the tray**, once per state change per
+  window, so you learn about a crossing with the flyout closed. Uses the tray's
+  native Shell notification. `budgets.notify` gates it.
+- Per-project entries feed the amber/red tray icon tinting too.
+
+### Pricing without a release
+- `pricing.local.json` (in the config dir) overrides built-in rates; the
+  hosted `pricing.json` table can refresh them daily via `pricing.remote_url`
+  (set it empty to disable). Bad payloads are ignored, never fatal.
+- Explicit `input_1m` rates are now honored for the 1M-context tier — the
+  field was documented but previously ignored.
+- CI keeps `pricing.json` in lockstep with `pricing.py`.
+
+### Idle backoff
+- `/api/today` shortens its cache to 4s while a session is live and stretches
+  to 30s when idle; the flyout polls at your configured cadence while live and
+  backs off to 30s idle; the tray loop backs off to 90s idle. A new session
+  still surfaces promptly (and instantly on open/focus).
+
+### Fixes & tooling
+- **Fixed: display prefs were never applied at startup.** The boot-time
+  `loadPrefs()` call hit a temporal-dead-zone error, so theme/accent/density
+  silently fell back to defaults until Settings was opened. A headless smoke
+  test now guards the boot path.
+- Fixed `pystray.notify()` argument order for pin/update notifications
+  (title and body were swapped).
+- `pyproject.toml` version drift fixed (was stuck at 0.12.0).
+- **`scripts/cut_release.py`** — one command bumps `__version__`, pyproject,
+  the installer fallback, README status, changelog, and tags the release.
+- CI: new `windows-latest` job (import smoke for tray/popup/mini + ruff, mypy,
+  pytest) and a Playwright smoke test that renders the flyout and overlay.
+
 ## v0.13.1 — auto-update restarts the app again
 
 - **Fixed: silent installs never relaunched the app.** The installer's

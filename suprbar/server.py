@@ -74,6 +74,10 @@ _ALLOWED_KEYS: set[str] = {
 # /api/today is cached briefly server-side. Provider-level caches still apply.
 _today_cache: dict = {"data": None, "ts": 0.0}
 _TODAY_TTL = 4.0
+# Idle backoff: with no live session there is nothing new to show, so the
+# cache can breathe. A new session still surfaces within this window (or
+# instantly on an explicit refresh / invalidation).
+_TODAY_TTL_IDLE = 30.0
 # Single-flight: without this, every HTTP thread + the tray refresh loop can
 # miss the TTL simultaneously and all run a full aggregator scan at once.
 _today_lock = threading.Lock()
@@ -95,10 +99,19 @@ def _now_monotonic() -> float:
     return time.monotonic()
 
 
+def _today_ttl() -> float:
+    """Short TTL while a session is live, longer TTL when idle."""
+    data = _today_cache.get("data")
+    if isinstance(data, dict) and (data.get("active")
+                                   or data.get("live_sessions")):
+        return _TODAY_TTL
+    return _TODAY_TTL_IDLE
+
+
 def today_cached() -> dict:
     with _today_lock:
         now = _now_monotonic()
-        if _today_cache["data"] and (now - _today_cache["ts"]) < _TODAY_TTL:
+        if _today_cache["data"] and (now - _today_cache["ts"]) < _today_ttl():
             return _today_cache["data"]
         try:
             data = aggregator.today()
@@ -363,6 +376,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file("app.js", "application/javascript")
         if path == "/styles.css":
             return self._serve_file("styles.css", "text/css")
+        if path == "/mini.html":
+            return self._serve_file("mini.html", "text/html; charset=utf-8")
+        if path == "/mini.js":
+            return self._serve_file("mini.js", "application/javascript")
+        if path == "/mini.css":
+            return self._serve_file("mini.css", "text/css")
 
         if path in ("/report", "/report.html"):
             return self._serve_report()
@@ -837,7 +856,8 @@ def _budgets_payload() -> dict:
     weekly  = float(b.get("weekly_limit",  0.0) or 0.0)
     monthly = float(b.get("monthly_limit", 0.0) or 0.0)
     alert_pct = int(b.get("alert_at_pct", 80) or 80)
-    if not (daily or weekly or monthly):
+    project_limits = config.project_limit_map()
+    if not (daily or weekly or monthly or project_limits):
         # No limits configured — skip the three range scans entirely. The
         # flyout polls this every 30s; scanning ~1.2k JSONL files for a
         # feature that's off was pure waste.
@@ -852,10 +872,13 @@ def _budgets_payload() -> dict:
         week_starts_on=week_starts,
         allowlist=config.project_allowlist(),
         denylist=config.project_denylist(),
+        project_limits=project_limits,
     )
-    # add alert flags
-    for window in ("daily", "weekly", "monthly"):
-        s[window]["alerting"] = s[window]["limit"] > 0 and s[window]["pct"] >= alert_pct
+    # add alert flags (global windows + per-project entries)
+    for entry in s.values():
+        if isinstance(entry, dict):
+            entry["alerting"] = entry.get("limit", 0) > 0 \
+                and entry.get("pct", 0) >= alert_pct
     s["alert_pct"] = alert_pct
     return s
 

@@ -15,7 +15,16 @@ Anthropic's published premium for the long-context variant.
 
 from __future__ import annotations
 
+import json
+import logging
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("suprbar.pricing")
 
 # ---------------------------------------------------------------- rates ----
 
@@ -223,14 +232,23 @@ def _rates_for(model: str) -> tuple[dict[str, float], bool]:
     return PRICING[fam], is_1m
 
 
+def _input_rate(rates: dict[str, float], is_1m: bool) -> float:
+    """Effective input rate: explicit ``input_1m`` wins, else the 2x premium."""
+    if is_1m:
+        explicit = rates.get("input_1m")
+        if explicit:
+            return float(explicit)
+        return rates["input"] * ONE_M_INPUT_MULT
+    return rates["input"]
+
+
 def rate_for_model(model: str) -> dict[str, float]:
     """Public: return effective {input, output} rate for a model id.
 
     Applies the 1M-context input premium when the model carries it.
     """
     rates, is_1m = _rates_for(model)
-    inp = rates["input"] * (ONE_M_INPUT_MULT if is_1m else 1.0)
-    return {"input": inp, "output": rates["output"]}
+    return {"input": _input_rate(rates, is_1m), "output": rates["output"]}
 
 
 # ---------------------------------------------------------------- cost ----
@@ -259,7 +277,7 @@ def cost_for(family_or_model: str, usage: dict[str, Any]) -> float:
     if family_or_model in PRICING and not is_1m:
         rates = PRICING[family_or_model]
 
-    inp_rate = rates["input"] * (ONE_M_INPUT_MULT if is_1m else 1.0)
+    inp_rate = _input_rate(rates, is_1m)
     out_rate = rates["output"]
 
     inp = usage.get("input_tokens", 0) or 0
@@ -309,6 +327,216 @@ def cache_savings_over_models(
         rate = PRICING["opus"]["input"]
         saved += (leftover_cache_read * rate * 0.9) / 1_000_000
     return saved
+
+
+# ---------------------------------------------------------------- overrides ----
+
+# Rate overrides let new model prices land without shipping a release. Two
+# sources, applied low → high precedence:
+#   1. a hosted JSON table (opt-in via pricing.remote_url, cached 24h)
+#   2. %LOCALAPPDATA%\suprbar\pricing.local.json (always wins)
+#
+# Payload shape (all keys optional):
+#   {"family": {"opus": {"input": 15.0, "output": 75.0}},
+#    "models": {"claude-opus-4-8": {"input": 15.0, "output": 75.0, "input_1m": 30.0}},
+#    "generic": [["gpt-6", {"input": 1.5, "output": 12.0}]]}
+
+_MAX_RATE = 100_000.0        # USD per 1M tokens; above this is a typo or garbage
+_MAX_REMOTE_BYTES = 512 * 1024
+_REMOTE_TTL_SECONDS = 24 * 3600
+_REMOTE_TIMEOUT_SECONDS = 8.0
+
+_remote_lock = threading.Lock()
+
+
+def _coerce_rate_dict(d: Any) -> dict[str, float] | None:
+    """Validate one rate blob. Returns None unless input+output are sane."""
+    if not isinstance(d, dict):
+        return None
+    out: dict[str, float] = {}
+    for key in ("input", "output", "input_1m"):
+        v = d.get(key)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0 < f <= _MAX_RATE:
+            out[key] = f
+    if "input" not in out or "output" not in out:
+        return None
+    return out
+
+
+def parse_override_payload(payload: Any) -> int:
+    """Merge a pricing override payload into the built-in tables.
+
+    Returns the number of entries applied. Malformed entries are skipped,
+    never fatal — a bad rate table must not break cost accounting.
+    """
+    if not isinstance(payload, dict):
+        return 0
+    applied = 0
+
+    fam = payload.get("family")
+    if isinstance(fam, dict):
+        for name, rates in fam.items():
+            rd = _coerce_rate_dict(rates)
+            if rd and isinstance(name, str) and name.strip():
+                PRICING[name.strip().lower()] = {
+                    "input": rd["input"], "output": rd["output"]}
+                applied += 1
+
+    models = payload.get("models")
+    if isinstance(models, dict):
+        for name, rates in models.items():
+            rd = _coerce_rate_dict(rates)
+            if rd and isinstance(name, str) and name.strip():
+                MODEL_RATES[name.strip().lower()] = rd
+                applied += 1
+
+    generic = payload.get("generic")
+    if isinstance(generic, list):
+        for item in generic:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                continue
+            pat, rates = item
+            rd = _coerce_rate_dict(rates)
+            if not (rd and isinstance(pat, str) and pat.strip()):
+                continue
+            pat_l = pat.strip().lower()
+            entry = (pat_l, {"input": rd["input"], "output": rd["output"]})
+            # Most-specific-first, and replace in place when the pattern is
+            # already known — repeated loads of the same table must not stack.
+            for i, (existing, _r) in enumerate(GENERIC_MODEL_RATES):
+                if existing == pat_l:
+                    GENERIC_MODEL_RATES[i] = entry
+                    break
+            else:
+                GENERIC_MODEL_RATES.insert(0, entry)
+            applied += 1
+    return applied
+
+
+def _config_dir() -> Path:
+    from . import config
+    return config.config_dir()
+
+
+def local_override_path() -> Path:
+    return _config_dir() / "pricing.local.json"
+
+
+def remote_cache_path() -> Path:
+    return _config_dir() / "pricing-cache.json"
+
+
+def load_local_overrides() -> int:
+    """Merge ``pricing.local.json`` (if present) over the built-ins."""
+    p = local_override_path()
+    try:
+        if not p.exists():
+            return 0
+        payload = json.loads(p.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning("pricing.local.json ignored: %s", e)
+        return 0
+    n = parse_override_payload(payload)
+    if n:
+        log.info("applied %d local pricing overrides", n)
+    return n
+
+
+def _cache_age_seconds() -> float | None:
+    """Seconds since the last successful remote fetch, or None if never."""
+    try:
+        doc = json.loads(remote_cache_path().read_text("utf-8"))
+        ts = float(doc.get("fetched_at", 0) or 0)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return max(0.0, time.time() - ts) if ts > 0 else None
+
+
+def _apply_cached_remote() -> int:
+    try:
+        doc = json.loads(remote_cache_path().read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    return parse_override_payload(doc.get("payload"))
+
+
+def _fetch_json(url: str) -> Any | None:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "suprbar-pricing/1", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_REMOTE_TIMEOUT_SECONDS) as r:
+            if getattr(r, "status", 200) != 200:
+                return None
+            raw = r.read(_MAX_REMOTE_BYTES + 1)
+    except (OSError, urllib.error.URLError, ValueError) as e:
+        log.debug("pricing fetch failed: %s", e)
+        return None
+    if len(raw) > _MAX_REMOTE_BYTES:
+        log.warning("pricing table too large (%d bytes) — ignored", len(raw))
+        return None
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        log.debug("pricing payload invalid: %s", e)
+        return None
+
+
+def refresh_remote(force: bool = False) -> bool:
+    """Fetch the hosted pricing table when due, then merge it.
+
+    https-only, size-capped, best-effort. Never raises; returns True when a
+    fresh table was applied.
+    """
+    from . import config
+    url = config.pricing_remote_url()
+    if not url.lower().startswith("https://"):
+        return False
+    if not force:
+        age = _cache_age_seconds()
+        if age is not None and age < _REMOTE_TTL_SECONDS:
+            return False
+    with _remote_lock:
+        payload = _fetch_json(url)
+        if payload is None:
+            return False
+        try:
+            d = _config_dir()
+            d.mkdir(parents=True, exist_ok=True)
+            tmp = remote_cache_path().with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({
+                "fetched_at": time.time(),
+                "url": url,
+                "payload": payload,
+            }), encoding="utf-8")
+            tmp.replace(remote_cache_path())
+        except OSError as e:
+            log.debug("pricing cache write failed: %s", e)
+        n = parse_override_payload(payload)
+        if n:
+            log.info("applied %d remote pricing overrides", n)
+        # The local file always wins: re-apply it on top of the fetched table.
+        load_local_overrides()
+        return n > 0
+
+
+def init_pricing() -> None:
+    """Apply cached + local overrides now; refresh from the web in the
+    background. Called once at startup (no-op offline / when unconfigured).
+
+    Precedence: hosted table (low) < pricing.local.json (high).
+    """
+    _apply_cached_remote()
+    load_local_overrides()
+    threading.Thread(target=refresh_remote, daemon=True,
+                     name="suprbar-pricing").start()
 
 
 # ---------------------------------------------------------------- self-test ----

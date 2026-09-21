@@ -3,3 +3,4 @@ pyinstaller>=6
 ruff>=0.5
 pytest>=8
 mypy>=1.10
+playwright>=1.40

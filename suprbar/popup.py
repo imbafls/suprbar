@@ -29,10 +29,14 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import webview
 
 from . import config
+
+if TYPE_CHECKING:
+    from .mini import MiniBridge
 
 log = logging.getLogger("suprbar.popup")
 
@@ -295,6 +299,37 @@ def _hide_from_taskbar(hwnd: int) -> None:
         pass
 
 
+def set_click_through(hwnd: int, enabled: bool) -> None:
+    """Toggle mouse-input transparency for a window (flyout or mini).
+
+    Uses WS_EX_TRANSPARENT; paired with WS_EX_LAYERED because that is what
+    makes hit-testing pass through to the windows underneath. A layered
+    window also needs an explicit alpha or it can render invisibly, so we
+    set it fully opaque. No-ops off Windows / with no HWND.
+    """
+    if sys.platform != "win32" or not hwnd:
+        return
+    try:
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        LWA_ALPHA = 0x00000002
+        user32 = ctypes.windll.user32
+        get_long = user32.GetWindowLongPtrW
+        set_long = user32.SetWindowLongPtrW
+        get_long.restype = ctypes.c_ssize_t
+        set_long.restype = ctypes.c_ssize_t
+        ex = get_long(hwnd, GWL_EXSTYLE)
+        if enabled:
+            set_long(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+            user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
+        else:
+            set_long(hwnd, GWL_EXSTYLE,
+                     ex & ~WS_EX_TRANSPARENT & ~WS_EX_LAYERED)
+    except OSError as e:
+        log.debug("click-through toggle failed: %s", e)
+
+
 # ---------- Single-instance mutex ----------
 
 _mutex_handle: int | None = None
@@ -393,6 +428,8 @@ class TrayBridge:
         # Settings-open hint passed via URL hash. The frontend reads
         # location.hash on load to decide whether to jump to settings.
         self._open_settings_next_show = False
+        # Mini overlay bridge (attached by run() below). None until then.
+        self.mini: MiniBridge | None = None
         # Debounce window-position writes during drag (was syncing JSON every
         # moved event — that stuttered badly on Win11 WebView2).
         self._pending_pos: tuple[int, int] | None = None
@@ -425,6 +462,15 @@ class TrayBridge:
         # Mica/backdrop blur during HWND drag makes WebView2 repaint lag badly;
         # rounded corners only.
         _hide_from_taskbar(hwnd)
+        self.apply_click_through()
+
+    def apply_click_through(self) -> None:
+        """Sync the flyout's mouse-input transparency to behavior.click_through."""
+        try:
+            on = bool(config.get_pref("behavior.click_through", False))
+        except Exception:
+            on = False
+        set_click_through(self._resolve_hwnd(), on)
 
     def _resolve_show_xy(self) -> tuple[int, int]:
         """Pick (x, y) for show(): saved position clamped to current monitor
@@ -601,6 +647,29 @@ class JsApi:
         """Programmatically open the settings view in the popup."""
         self._bridge.open_with_settings()
 
+    def apply_click_through(self):
+        """Re-read behavior.click_through and apply it to the flyout HWND."""
+        self._bridge.apply_click_through()
+
+    def apply_mini(self):
+        """Re-read mini prefs and sync the overlay + its click-through state.
+
+        Called by the settings UI after committing mini.* / unaffected prefs.
+        """
+        mini = getattr(self._bridge, "mini", None)
+        if mini is None:
+            return
+        try:
+            enabled = config.mini_enabled()
+        except Exception:
+            enabled = False
+        if enabled:
+            if not mini.is_visible():
+                mini.show()
+        elif mini.is_visible():
+            mini.hide()
+        mini.apply_click_through()
+
     def consume_pending_open(self) -> str:
         """Frontend may poll this on load to discover a queued navigation."""
         if self._bridge._open_settings_next_show:
@@ -669,12 +738,24 @@ def run(url: str, bridge: TrayBridge, on_started: Callable[[], None]) -> None:
     """Blocks on the main thread until quit."""
     build_window(url, bridge)
 
+    # The mini overlay is always created (hidden) so it can be toggled from
+    # tray/settings without a restart; it only shows when mini.enabled is set.
+    from . import mini as _mini
+    mini_bridge = _mini.MiniBridge(bridge)
+    bridge.mini = mini_bridge
+    _mini.build_window(url, mini_bridge)
+
     def started():
         # webview is up; safe to launch tray
         try:
             on_started()
         except Exception:
             log.exception("on_started callback failed")
+        try:
+            if config.mini_enabled():
+                mini_bridge.show()
+        except Exception:
+            log.debug("mini overlay autoshow failed", exc_info=True)
 
     try:
         webview.start(started, debug=False)

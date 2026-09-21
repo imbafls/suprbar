@@ -16,12 +16,22 @@ const $ = (id) => document.getElementById(id);
 
 const POLL_MS_ACTIVE = 5000;
 const POLL_MS_HIDDEN = 60000;
+// Idle backoff: no live session means nothing new to show, so poll slower.
+// An open flyout still forces a fresh scan on focus/visibility.
+const POLL_MS_IDLE = 30000;
 let pollTimer = null;
 let pollInterval = POLL_MS_ACTIVE;
+let pollBaseMs = POLL_MS_ACTIVE;   // user-configured cadence (behavior.refresh_seconds)
 
 // Mirror of prefs.display, kept current by applyDisplayPrefs() so the
 // formatters below can honor cost_format / token_format without a lookup.
 let displayPrefs = {};
+
+// Settings state. Declared up here because the boot block below calls
+// loadPrefs() synchronously at script top level — a `let` further down would
+// leave that call in the temporal dead zone (and silently fail).
+let prefsCache = null;
+let schemaCache = null;
 
 function fmtTokens(n) {
   n = Number(n || 0);
@@ -823,6 +833,7 @@ async function load({ refresh = false } = {}) {
     if (etag) todayEtag = etag;
     const data = await res.json();
     render(data);
+    adaptPollToData(data);
     lastRefreshAt = Date.now();
     setConnBanner(false);
     // success — reset backoff
@@ -1534,11 +1545,20 @@ function setPollInterval(ms) {
   pollTimer = setInterval(load, ms);
 }
 
+// Live data → configured cadence; idle data → at least POLL_MS_IDLE.
+function adaptPollToData(data) {
+  if (!pollBaseMs) return;  // manual-only
+  const live = !!(data && (data.active
+    || (Array.isArray(data.live_sessions) && data.live_sessions.length)));
+  const ms = live ? pollBaseMs : Math.max(pollBaseMs, POLL_MS_IDLE);
+  if (ms !== pollInterval) setPollInterval(ms);
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     setPollInterval(POLL_MS_HIDDEN);
   } else {
-    setPollInterval(POLL_MS_ACTIVE);
+    setPollInterval(pollBaseMs || POLL_MS_ACTIVE);
     load({ refresh: true });
   }
 });
@@ -1647,8 +1667,6 @@ window.suprbar = { load, loadConfig, toast, exportTodayCSV };
 //  Range tabs + budgets + dynamic settings (50+ prefs)
 // ════════════════════════════════════════════════════════════════════════
 
-let prefsCache = null;
-let schemaCache = null;
 let currentRange = localStorage.getItem('suprbar.range') || 'today';
 
 const SECTION_TITLES = {
@@ -1656,16 +1674,18 @@ const SECTION_TITLES = {
   display:  'Display',
   budgets:  'Budgets & alerts',
   behavior: 'Behavior',
+  mini:     'Mini overlay',
   projects: 'Projects',
   sources:  'Sources',
+  pricing:  'Pricing',
   data:     'Data & privacy',
   window:   'Window',
   ui:       'Tray & startup',
   updates:  'Updates',
 };
 
-const SECTION_ORDER = ['display','budgets','behavior','ui','range','projects',
-                       'sources','window','data','updates'];
+const SECTION_ORDER = ['display','budgets','behavior','mini','ui','range',
+                       'projects','sources','pricing','window','data','updates'];
 
 // Internal update state — persisted in config (needed by set_many) but NOT
 // user-facing settings. These never render as editable rows: updates.last_check
@@ -1713,8 +1733,9 @@ const LABELS = {
   'budgets.weekly_limit':   { label: 'Weekly limit ($)',      desc: 'Per-week cap. 0 = no limit.' },
   'budgets.monthly_limit':  { label: 'Monthly limit ($)',     desc: 'Per-month cap. 0 = no limit.' },
   'budgets.alert_at_pct':   { label: 'Alert threshold (%)',   desc: 'Warn when % of any limit is reached.' },
-  'budgets.notify':         { label: 'Toast on warning',      desc: 'Pop a toast when a budget crosses its threshold.' },
+  'budgets.notify':         { label: 'Notify on warning',     desc: 'System notification when a budget crosses its threshold.' },
   'budgets.tray_warn_color': { label: 'Tint tray icon',       desc: 'Tray icon turns amber/red when over budget.' },
+  'budgets.project_limits': { label: 'Per-project daily caps', desc: 'project=amount entries (e.g. discord=50). Daily USD cap per project.' },
   // behavior
   'behavior.refresh_seconds':      { label: 'Refresh interval',      desc: 'Seconds between auto-refreshes. 0 = manual only.' },
   'behavior.auto_hide':            { label: 'Auto-hide on blur',     desc: 'Hide popup when focus moves away.' },
@@ -1722,7 +1743,13 @@ const LABELS = {
   'behavior.always_on_top':        { label: 'Always on top',         desc: 'Popup stays above other windows.' },
   'behavior.live_threshold_seconds': { label: 'Live session window', desc: 'Sessions touched in last N seconds are "live".' },
   'behavior.confirm_quit':         { label: 'Confirm before quit',   desc: 'Prompt before Alt+Q closes the app.' },
-  'behavior.click_through':        { label: 'Click-through mode',    desc: 'Popup ignores mouse clicks (header still draggable).' },
+  'behavior.click_through':        { label: 'Click-through mode',    desc: 'Popup ignores mouse clicks. Turn it back off from the tray icon menu.' },
+  // mini overlay
+  'mini.enabled':       { label: 'Show mini overlay',     desc: 'Tiny always-on-top chip with live cost + burn rate.' },
+  'mini.show_burn':     { label: 'Show burn rate',        desc: 'Include $/hour in the overlay while a session is live.' },
+  'mini.click_through': { label: 'Overlay click-through', desc: 'Overlay ignores mouse clicks. Turn it back off from the tray icon menu.' },
+  // pricing
+  'pricing.remote_url': { label: 'Pricing table URL',     desc: 'HTTPS JSON rate table, fetched daily. Empty = built-in rates only.' },
   // projects
   'projects.allowlist':     { label: 'Allowlist',             desc: 'Comma-separated. If non-empty, only these are shown.' },
   'projects.denylist':      { label: 'Denylist',              desc: 'Always hidden. Useful for personal/secret repos.' },
@@ -2063,11 +2090,13 @@ function applyDisplayPrefs(prefs) {
   setHidden('#mModelCell', d.show_model === false);
   setHidden('#mSessionsCell', d.show_sessions_today === false);
 
-  // refresh interval
+  // refresh interval (idle backoff applies on top — see adaptPollToData)
   const refresh = Math.max(0, Number(b.refresh_seconds ?? 5));
+  pollBaseMs = refresh > 0 ? refresh * 1000 : 0;
   if (typeof setPollInterval === 'function') {
     if (refresh === 0) setPollInterval(0);  // manual
-    else setPollInterval(refresh * 1000);
+    else if (typeof adaptPollToData === 'function') adaptPollToData(lastData);
+    else setPollInterval(pollBaseMs);
   }
 }
 
@@ -2109,6 +2138,15 @@ function prefsCommit(path, val, { silent = false } = {}) {
     prefsCache = d.prefs;
     applyDisplayPrefs(prefsCache);
     if (path === 'ui.pinned') syncPinButton(!!val);
+    // Python-side window modes: the pref is already persisted via the POST;
+    // these nudge the native window to match without a restart.
+    if (path === 'behavior.click_through'
+        && window.pywebview?.api?.apply_click_through) {
+      window.pywebview.api.apply_click_through();
+    }
+    if (path.startsWith('mini.') && window.pywebview?.api?.apply_mini) {
+      window.pywebview.api.apply_mini();
+    }
     if (path.startsWith('range.') || path.startsWith('projects.')) {
       load({ refresh: true });
       loadBudgets();

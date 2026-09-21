@@ -1,0 +1,91 @@
+/* ============================================================================
+   supr.bar — mini overlay (always-on-top HUD)
+   Reuses styles.css tokens. The window is frameless + opaque; DWM rounds the
+   HWND, CSS rounds the body to match. Whole surface drags (easy_drag) except
+   the cost area and the dismiss button, which are -webkit-app-region: no-drag.
+   ========================================================================== */
+
+body.mini {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  background: var(--b-surface);
+  border: 1px solid var(--b-line-2);
+  border-radius: 10px;
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+  cursor: grab;
+}
+body.mini:active { cursor: grabbing; }
+
+/* live pip — dim when idle, green + soft pulse while a session is active */
+body.mini .pip {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  background: var(--b-faint);
+  transition: background var(--dur);
+}
+body.mini.live .pip {
+  background: var(--b-success);
+  box-shadow: 0 0 0 3px var(--b-success-soft);
+  animation: mini-pulse 2.4s ease-in-out infinite;
+}
+@keyframes mini-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+body.mini.no-animations .pip { animation: none !important; }
+
+/* cost + burn — the click target that opens the full flyout */
+body.mini .open {
+  all: unset;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: 6px;
+}
+body.mini .open:focus-visible { outline: var(--b-ring); }
+body.mini .open .cost {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--b-text);
+  font-variant-numeric: tabular-nums;
+}
+body.mini .open .burn {
+  font-size: 10.5px;
+  color: var(--b-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* dismiss — revealed on hover only */
+body.mini .x {
+  all: unset;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  flex: none;
+  width: 18px; height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--b-dimmer);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur), background var(--dur), color var(--dur);
+}
+body.mini:hover .x { opacity: 1; }
+body.mini .x:hover { background: var(--b-surface-3); color: var(--b-text); }
+body.mini .x:focus-visible { outline: var(--b-ring); opacity: 1; }
+
+/* server unreachable — dim the whole chip */
+body.mini.offline { opacity: 0.55; }
