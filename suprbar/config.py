@@ -79,6 +79,7 @@ DEFAULTS: dict[str, Any] = {
     "display": {
         "theme":       "dark",         # dark|light|auto
         "accent":      "blue",         # violet|blue|green|orange|pink (blue = refined indigo, the redesign default)
+        "density":     "normal",       # compact|normal|spacious
         "font_scale":  1.0,            # 0.85..1.25
         "cost_format": "with_cents",   # with_cents|whole
         "animations": True,            # toggle all UI animations
@@ -224,7 +225,7 @@ _REMOVED_SECTIONS = ("keyboard", "window")
 _REMOVED_KEYS: dict[str, tuple[str, ...]] = {
     "range":    ("compare_previous", "custom_start", "custom_end",
                  "day_boundary", "rolling_24h", "include_weekends"),
-    "display":  ("currency", "locale", "density", "token_format",
+    "display":  ("currency", "locale", "token_format",
                  "show_token_bar", "show_cache_info", "show_burn_rate",
                  "show_model", "show_project", "show_sessions_today"),
     "budgets":  ("audio_alert", "quiet_hours", "quiet_start", "quiet_end"),
@@ -379,6 +380,7 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     # display
     "display.theme":          ("enum", ("dark", "light", "auto")),
     "display.accent":         ("enum", ("violet", "blue", "green", "orange", "pink")),
+    "display.density":        ("enum", ("compact", "normal", "spacious")),
     "display.font_scale":     ("float", (0.85, 1.25)),
     "display.cost_format":    ("enum", ("with_cents", "whole")),
     "display.animations":         ("bool", None),

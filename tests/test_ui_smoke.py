@@ -140,8 +140,9 @@ def _prefs_fixture() -> dict:
     return {"prefs": {
         "schema_version": 4,
         "range": {"default": "today", "week_starts_on": "mon"},
-        "display": {"theme": "dark", "accent": "blue", "font_scale": 1.0,
-                    "cost_format": "with_cents", "animations": True},
+        "display": {"theme": "dark", "accent": "blue", "density": "compact",
+                    "font_scale": 1.0, "cost_format": "with_cents",
+                    "animations": True},
         "budgets": {"daily_limit": 25.0, "weekly_limit": 0.0,
                     "monthly_limit": 750.0, "alert_at_pct": 80,
                     "notify": True, "tray_warn_color": True,
@@ -244,9 +245,12 @@ class UiSmokeTest(unittest.TestCase):
                 self.assertIn(
                     "Per-project daily caps",
                     page.text_content("#settingsSections"))
-                # ...and no longer render the settings trimmed in schema v4.
+                # Density pref (restored in v0.15.5) applies as a body class.
+                self.assertIn("compact",
+                              page.get_attribute("body", "class") or "")
+                # ...and the trimmed settings stay trimmed.
                 settings_text = page.text_content("#settingsSections")
-                self.assertNotIn("Density", settings_text)
+                self.assertIn("Density", settings_text)
                 self.assertNotIn("Width (px)", settings_text)
                 self.assertNotIn("Auto-hide delay", settings_text)
                 self.assertEqual(errors, [])

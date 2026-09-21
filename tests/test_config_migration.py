@@ -45,8 +45,10 @@ class SchemaV4MigrationTest(unittest.TestCase):
         self.assertEqual(cfg["range"]["default"], "7d")
         self.assertEqual(cfg["behavior"]["refresh_seconds"], 10)
         self.assertEqual(cfg["budgets"]["daily_limit"], 5.0)
+        # density survives (un-trimmed in v0.15.5)
+        self.assertEqual(cfg["display"]["density"], "compact")
         # removed keys are pruned
-        for key in ("density", "token_format", "show_burn_rate",
+        for key in ("token_format", "show_burn_rate",
                     "show_token_bar", "show_cache_info", "show_model",
                     "show_project", "show_sessions_today"):
             self.assertNotIn(key, cfg["display"])
@@ -56,9 +58,8 @@ class SchemaV4MigrationTest(unittest.TestCase):
         self.assertNotIn("auto_hide_delay_ms", cfg["behavior"])
         self.assertNotIn("window", cfg)
         # and the schema no longer advertises them
-        for path in ("display.density", "display.token_format",
-                     "range.day_boundary", "window.width",
-                     "behavior.auto_hide_delay_ms"):
+        for path in ("display.token_format", "range.day_boundary",
+                     "window.width", "behavior.auto_hide_delay_ms"):
             self.assertNotIn(path, config.SCHEMA)
 
 

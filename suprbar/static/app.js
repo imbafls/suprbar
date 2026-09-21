@@ -1774,6 +1774,7 @@ const LABELS = {
   // display
   'display.theme':          { label: 'Theme',                 desc: 'Dark, light, or follow OS.' },
   'display.accent':         { label: 'Accent color',          desc: 'Tints highlights and pin.' },
+  'display.density':        { label: 'Density',               desc: 'Compact, normal, or spacious padding.' },
   'display.font_scale':     { label: 'Font scale',            desc: '0.85× to 1.25× the base size.' },
   'display.cost_format':    { label: 'Cost format',           desc: 'Show cents or round to whole dollars.' },
   'display.animations':     { label: 'Animations',            desc: 'Disable for reduced motion.' },
@@ -2128,6 +2129,9 @@ function applyDisplayPrefs(prefs) {
                                              : '';
   // accent (default = refined indigo, the redesign default)
   body.dataset.accent = d.accent || 'blue';
+  // density
+  body.classList.toggle('compact',  d.density === 'compact');
+  body.classList.toggle('spacious', d.density === 'spacious');
   // font scale
   body.style.setProperty('--font-scale', String(d.font_scale || 1));
   // animations

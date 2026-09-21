@@ -1,5 +1,13 @@
 # supr.bar CHANGELOG
 
+## v0.15.5 — density is back
+
+- **Restored the Density setting (compact / normal / spacious)** that the
+  v0.15.0 trim removed. If you had compact selected, the flyout looked
+  noticeably roomier after the update — it is selectable again under
+  Settings → Display, and it survives config migrations. (Everything else
+  from the v0.15 trim stays trimmed.)
+
 ## v0.15.4 — fetch timeouts
 
 - The flyout and mini overlay now time out stalled localhost requests
