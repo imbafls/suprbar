@@ -1,5 +1,13 @@
 # supr.bar CHANGELOG
 
+## v0.15.4 — fetch timeouts
+
+- The flyout and mini overlay now time out stalled localhost requests
+  (15s for today/budgets, 60s for range scans, 20s for the overlay) and retry.
+  Previously a request that hung behind a long scan left the overlay on its
+  `$0.00` placeholder until restart — the last piece of the "stuck after
+  launch" report.
+
 ## v0.15.3 — quieter, faster startup
 
 - **The hidden flyout no longer forces a refresh at boot.** That refresh

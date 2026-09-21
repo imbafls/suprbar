@@ -812,7 +812,13 @@ async function load({ refresh = false } = {}) {
     if (todayEtag && !refresh) headers['If-None-Match'] = todayEtag;
     const res = await fetch(
       refresh ? '/api/today?refresh=1' : '/api/today',
-      { cache: 'no-store', signal, headers },
+      {
+        cache: 'no-store',
+        // Cancel on supersede (AbortController) or after 15s (a scan can be
+        // slow, but a hung request must not freeze the UI forever).
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+        headers,
+      },
     );
     if (res.status === 304) {
       lastRefreshAt = Date.now();
@@ -1883,7 +1889,10 @@ async function loadRange({ refresh = false } = {}) {
   }
   const params = new URLSearchParams({ key });
   if (refresh) params.set('refresh', '1');
-  const p = fetch('/api/range?' + params, { cache: 'no-store' })
+  const p = fetch('/api/range?' + params, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(60000),
+  })
     .then(res => { if (!res.ok) throw new Error('http ' + res.status); return res.json(); })
     .then(d => {
       _rangeCache.set(key, d);
@@ -1900,7 +1909,10 @@ async function loadRange({ refresh = false } = {}) {
 // first click on any tab is instant.
 function prefetchRanges() {
   const keys = ['24h', '7d', 'week', 'month', '30d', '90d'];
-  const fire = (k) => fetch('/api/range?key=' + k, { cache: 'no-store' })
+  const fire = (k) => fetch('/api/range?key=' + k, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(60000),
+  })
     .then(r => r.ok ? r.json() : null)
     .then(d => { if (d) _rangeCache.set(k, d); })
     .catch(() => {});
@@ -2011,7 +2023,10 @@ function renderRangeData(d) {
 
 async function loadBudgets() {
   try {
-    const r = await fetch('/api/budgets', { cache: 'no-store' });
+    const r = await fetch('/api/budgets', {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15000),
+  });
     if (!r.ok) return;
     const b = await r.json();
     renderBudget(b);

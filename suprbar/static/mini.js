@@ -22,6 +22,7 @@ let tickCount = 0;
 let leaveTimer = null;
 
 const BUDGET_STALE_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 function fmtMoney(n) {
   n = Number(n || 0);
@@ -51,7 +52,10 @@ function applyPrefs(p) {
 
 async function loadPrefs() {
   try {
-    const r = await fetch('/api/prefs', { cache: 'no-store' });
+    const r = await fetch('/api/prefs', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!r.ok) return;
     applyPrefs((await r.json()).prefs);
   } catch (_) { /* keep last known prefs */ }
@@ -128,7 +132,10 @@ function renderBudget() {
 
 async function fetchToday() {
   try {
-    const r = await fetch('/api/today', { cache: 'no-store' });
+    const r = await fetch('/api/today', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!r.ok) throw new Error('http ' + r.status);
     todayData = await r.json();
     document.body.classList.remove('offline', 'loading');
@@ -140,7 +147,10 @@ async function fetchToday() {
 async function fetchBudgets() {
   if (Date.now() - lastBudgetFetch < BUDGET_STALE_MS) return;
   try {
-    const r = await fetch('/api/budgets', { cache: 'no-store' });
+    const r = await fetch('/api/budgets', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!r.ok) return;
     budgetData = await r.json();
     lastBudgetFetch = Date.now();

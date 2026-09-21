@@ -1,6 +1,6 @@
 [project]
 name = "suprbar"
-version = "0.15.3"
+version = "0.15.4"
 description = "API usage in your tray — Windows tray companion for Claude Code / opencode / Anthropic Admin API spend"
 requires-python = ">=3.11"
 license = { text = "MIT" }
