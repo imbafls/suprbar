@@ -35,7 +35,6 @@ let schemaCache = null;
 
 function fmtTokens(n) {
   n = Number(n || 0);
-  if (displayPrefs.token_format === 'full') return n.toLocaleString();
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
@@ -524,9 +523,7 @@ function renderByModel(d) {
 function renderModelChips(d) {
   const host = document.getElementById('modelChips');
   if (!host) return;
-  // NOTE: intentionally NOT tied to display.show_model — that pref governs
-  // the "Model" metric tile; the chips are a cost breakdown ("where the
-  // money went") and stay visible independently.
+  // Chips are a cost breakdown ("where the money went"), not the model tile.
   const rows = (Array.isArray(d.by_model) ? d.by_model : [])
     .filter(m => Number(m?.cost || 0) > 0.0001 || Number(m?.tokens || 0) > 0)
     .slice(0, 3);
@@ -733,8 +730,7 @@ function render(d) {
     const proj = head?.project || '~/.claude';
     const scanMs = d.cache_meta?.last_scan_ms ?? d.elapsed_ms ?? 0;
     const parse = Number(d.parse_errors || 0);
-    const projPart = displayPrefs.show_project === false ? '' : `${shortProject(proj)} · `;
-    setT('footMeta', `${projPart}scan ${scanMs}ms${parse ? ` · ${parse} parse err` : ''}`);
+    setT('footMeta', `${shortProject(proj)} · scan ${scanMs}ms${parse ? ` · ${parse} parse err` : ''}`);
   } else {
     if (live) {
       live.hidden = false;
@@ -1564,6 +1560,52 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('focus', () => load({ refresh: true }));
 
+// ───────────────────────── Drag-resize grip (frameless) ─────────────────────────
+// The window has no native resize border (FormBorderStyle.None); dragging the
+// corner grip calls pywebview's resize() through a throttled bridge call.
+
+(function initResizeGrip() {
+  const grip = document.getElementById('resizeGrip');
+  if (!grip) return;
+  let start = null, pending = null, raf = 0;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const flush = () => {
+    raf = 0;
+    if (!pending) return;
+    const { w, h } = pending;
+    pending = null;
+    try { window.pywebview?.api?.resize_window(w, h); } catch (_) { /* ignore */ }
+  };
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    try { grip.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    start = { x: e.screenX, y: e.screenY, w: window.innerWidth, h: window.innerHeight };
+    document.body.classList.add('resizing');
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    pending = {
+      w: Math.round(clamp(start.w + (e.screenX - start.x), 260, 800)),
+      h: Math.round(clamp(start.h + (e.screenY - start.y), 320, 1200)),
+    };
+    if (!raf) raf = requestAnimationFrame(flush);
+  });
+  const end = (e) => {
+    if (!start) return;
+    start = null;
+    document.body.classList.remove('resizing');
+    // Apply a final partial move that never got its animation frame.
+    if (pending) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      flush();
+    }
+    try { grip.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+  };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+})();
+
 // ───────────────────────── Initial boot ─────────────────────────
 
 document.body.classList.add('loading');                // matches CSS skeleton, removed after #20
@@ -1571,7 +1613,16 @@ load({ refresh: true });
 loadConfig();
 loadVersion();
 loadUpdateStatus();
-loadPrefs();
+loadPrefs().then(() => {
+  // First run only: honor range.default when it differs from the implicit
+  // "today" view. Once the user picks a tab, localStorage wins from then on.
+  try {
+    const def = prefsCache?.range?.default;
+    if (!localStorage.getItem('suprbar.range') && def && def !== currentRange) {
+      setRange(def);
+    }
+  } catch (_) { /* ignore */ }
+}).catch(() => { /* boot proceeds on defaults */ });
 setPollInterval(POLL_MS_ACTIVE);
 setInterval(updateStartedDisplay, 1000);
 window.addEventListener('hashchange', () => {
@@ -1679,13 +1730,12 @@ const SECTION_TITLES = {
   sources:  'Sources',
   pricing:  'Pricing',
   data:     'Data & privacy',
-  window:   'Window',
   ui:       'Tray & startup',
   updates:  'Updates',
 };
 
 const SECTION_ORDER = ['display','budgets','behavior','mini','ui','range',
-                       'projects','sources','pricing','window','data','updates'];
+                       'projects','sources','pricing','data','updates'];
 
 // Internal update state — persisted in config (needed by set_many) but NOT
 // user-facing settings. These never render as editable rows: updates.last_check
@@ -1709,25 +1759,14 @@ const QUICK_PREFS = [
 
 const LABELS = {
   // range
-  'range.default':          { label: 'Default range',         desc: 'Time range applied when popup opens.' },
+  'range.default':          { label: 'Default range',         desc: 'Initial range on first run (later sessions remember your last tab).' },
   'range.week_starts_on':   { label: 'Week starts on',        desc: 'Affects the "Wk" range tab.' },
-  'range.day_boundary':     { label: 'Day boundary',          desc: 'Compute "today" by local time or UTC.' },
-  'range.rolling_24h':      { label: 'Rolling 24h "today"',   desc: 'Use last 24 hours instead of calendar day.' },
-  'range.include_weekends': { label: 'Include weekends',      desc: 'Uncheck to exclude Sat/Sun from totals.' },
   // display
   'display.theme':          { label: 'Theme',                 desc: 'Dark, light, or follow OS.' },
   'display.accent':         { label: 'Accent color',          desc: 'Tints highlights and pin.' },
-  'display.density':        { label: 'Density',               desc: 'Compact, normal, or spacious padding.' },
   'display.font_scale':     { label: 'Font scale',            desc: '0.85× to 1.25× the base size.' },
   'display.cost_format':    { label: 'Cost format',           desc: 'Show cents or round to whole dollars.' },
-  'display.token_format':   { label: 'Token format',          desc: '"1.2k" compact or "1,234" full.' },
-  'display.show_token_bar':     { label: 'Show token mix bar',     desc: 'Input / output / cache ratio bar.' },
-  'display.show_cache_info':    { label: 'Show cache info',        desc: 'Cache-hit % + cache token count.' },
-  'display.show_burn_rate':     { label: 'Show burn rate',         desc: 'Live $/hour for the active session.' },
-  'display.show_model':         { label: 'Show model name',        desc: 'Current model in the metric trio.' },
-  'display.show_project':       { label: 'Show project name',      desc: 'Project shown in the footer.' },
-  'display.show_sessions_today': { label: 'Show session count',    desc: 'Distinct sessions today.' },
-  'display.animations':         { label: 'Animations',             desc: 'Disable for reduced motion.' },
+  'display.animations':     { label: 'Animations',            desc: 'Disable for reduced motion.' },
   // budgets
   'budgets.daily_limit':    { label: 'Daily limit ($)',       desc: 'Per-day cap. 0 = no limit.' },
   'budgets.weekly_limit':   { label: 'Weekly limit ($)',      desc: 'Per-week cap. 0 = no limit.' },
@@ -1739,7 +1778,6 @@ const LABELS = {
   // behavior
   'behavior.refresh_seconds':      { label: 'Refresh interval',      desc: 'Seconds between auto-refreshes. 0 = manual only.' },
   'behavior.auto_hide':            { label: 'Auto-hide on blur',     desc: 'Hide popup when focus moves away.' },
-  'behavior.auto_hide_delay_ms':   { label: 'Auto-hide delay (ms)',  desc: 'Grace period before hiding.' },
   'behavior.always_on_top':        { label: 'Always on top',         desc: 'Popup stays above other windows.' },
   'behavior.live_threshold_seconds': { label: 'Live session window', desc: 'Sessions touched in last N seconds are "live".' },
   'behavior.confirm_quit':         { label: 'Confirm before quit',   desc: 'Prompt before Alt+Q closes the app.' },
@@ -1757,9 +1795,6 @@ const LABELS = {
   'projects.top_n':         { label: 'Top N',                 desc: 'Number of projects in the "Top projects" list.' },
   // data
   'data.log_level':          { label: 'Log level',            desc: 'Verbosity of suprbar.log.' },
-  // window
-  'window.width':             { label: 'Width (px)',          desc: 'Popup width.' },
-  'window.height':            { label: 'Height (px)',         desc: 'Popup height.' },
   // sources
   'sources.local.enabled':              { label: 'Local source',            desc: 'Reads ~/.claude/projects/**/*.jsonl.' },
   'sources.anthropic_api.enabled':      { label: 'Anthropic API source',    desc: 'Org-wide spend via Admin API. Requires key above.' },
@@ -2072,23 +2107,12 @@ function applyDisplayPrefs(prefs) {
                                              : '';
   // accent (default = refined indigo, the redesign default)
   body.dataset.accent = d.accent || 'blue';
-  // density
-  body.classList.toggle('compact',  d.density === 'compact');
-  body.classList.toggle('spacious', d.density === 'spacious');
   // font scale
   body.style.setProperty('--font-scale', String(d.font_scale || 1));
   // animations
   body.classList.toggle('no-animations', d.animations === false);
   // click-through
   body.classList.toggle('click-through', b.click_through === true);
-
-  // visibility of each metric tile / chip
-  const setHidden = (sel, hide) => document.querySelectorAll(sel).forEach(e => e.hidden = !!hide);
-  setHidden('.tok-bar, .tok-legend', d.show_token_bar === false);
-  setHidden('#cacheHit', d.show_cache_info === false);
-  setHidden('#mBurnCell, #mBurn', d.show_burn_rate === false);
-  setHidden('#mModelCell', d.show_model === false);
-  setHidden('#mSessionsCell', d.show_sessions_today === false);
 
   // refresh interval (idle backoff applies on top — see adaptPollToData)
   const refresh = Math.max(0, Number(b.refresh_seconds ?? 5));
@@ -2604,7 +2628,7 @@ document.getElementById('importFileInput')?.addEventListener('change', async (e)
   e.target.value = '';
 });
 
-// Boot prefs apply ASAP so theme/density takes effect on first paint
+// Boot prefs apply ASAP so theme/accent take effect on first paint
 loadPrefs().catch(() => {});
 
 window.suprbar.setRange = setRange;

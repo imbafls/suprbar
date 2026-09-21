@@ -9,6 +9,7 @@ installs it — see .github/workflows/ci.yml.
 
 from __future__ import annotations
 
+import time
 import unittest
 from unittest import mock
 
@@ -104,17 +105,86 @@ def _fixture() -> dict:
     }
 
 
+def _range_fixture() -> dict:
+    return {
+        "range": {"key": "24h", "label": "last 24h",
+                  "start": "2026-09-20T15:42:00-05:00",
+                  "end": "2026-09-21T15:42:00-05:00", "days": 1},
+        "totals": {"cost": 1650.14, "messages": 3342, "tokens": 12000000,
+                   "input": 1000000, "output": 2000000, "cache_5m": 0,
+                   "cache_1h": 0, "cache_read": 9000000,
+                   "cache_hit_ratio": 0.9, "sessions": 5, "projects": 3},
+        "by_day": [], "by_model": [], "by_project": [],
+        "hourly": [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
+                   for h in range(24)],
+        "files_scanned": 12, "parse_errors": 0, "scan_ms": 60,
+    }
+
+
+def _budgets_fixture() -> dict:
+    return {
+        "daily": {"spent": 18.74, "limit": 25.0, "pct": 74.96, "over": False,
+                  "remaining": 6.26, "alerting": False},
+        "weekly": {"spent": 214.06, "limit": 0.0, "pct": 0.0, "over": False,
+                   "remaining": 0.0, "alerting": False},
+        "monthly": {"spent": 612.30, "limit": 750.0, "pct": 81.64,
+                    "over": False, "remaining": 137.70, "alerting": True},
+        "alert_pct": 80,
+    }
+
+
+def _prefs_fixture() -> dict:
+    return {"prefs": {
+        "schema_version": 4,
+        "range": {"default": "today", "week_starts_on": "mon"},
+        "display": {"theme": "dark", "accent": "blue", "font_scale": 1.0,
+                    "cost_format": "with_cents", "animations": True},
+        "budgets": {"daily_limit": 25.0, "weekly_limit": 0.0,
+                    "monthly_limit": 750.0, "alert_at_pct": 80,
+                    "notify": True, "tray_warn_color": True,
+                    "project_limits": ["discord=50"]},
+        "behavior": {"refresh_seconds": 5, "auto_hide": True,
+                     "always_on_top": True, "live_threshold_seconds": 60,
+                     "confirm_quit": False, "click_through": False},
+        "mini": {"enabled": False, "show_burn": True, "click_through": False},
+        "pricing": {"remote_url": ""},
+        "projects": {"allowlist": [], "denylist": [], "anonymize": False,
+                     "top_n": 10},
+        "data": {"log_level": "INFO"},
+        "ui": {"pinned": False, "start_on_login": False},
+        "updates": {"check_on_launch": True, "last_check": "",
+                    "skip_version": ""},
+        "sources": {
+            "local": {"enabled": True},
+            "anthropic_api": {"enabled": False},
+            "hermes": {"enabled": True},
+            "opencode": {"enabled": True},
+            "openrouter": {"enabled": False},
+            "openai": {"enabled": False},
+        },
+    }, "schema_version": 4}
+
+
 class UiSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._patch = mock.patch.object(
-            server, "today_cached", side_effect=_fixture)
-        cls._patch.start()
+        cls._patches = [
+            mock.patch.object(server, "today_cached", side_effect=_fixture),
+            mock.patch.object(server, "range_cached",
+                              side_effect=lambda *a, **k: _range_fixture()),
+            mock.patch.object(server, "_budgets_payload",
+                              side_effect=_budgets_fixture),
+            mock.patch.object(server, "_prefs_payload",
+                              side_effect=_prefs_fixture),
+        ]
+        for p in cls._patches:
+            p.start()
         cls.httpd, cls.port, cls.thread = server.start_in_background(0)
 
     @classmethod
     def tearDownClass(cls):
-        cls._patch.stop()
+        for p in cls._patches:
+            p.stop()
         cls.httpd.shutdown()
         cls.httpd.server_close()
 
@@ -124,6 +194,26 @@ class UiSmokeTest(unittest.TestCase):
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.goto(f"http://127.0.0.1:{self.port}{path}")
         return page, errors
+
+    def _wait_text(self, page, selector: str, needle: str,
+                   timeout: float = 10.0) -> str:
+        """Poll for `needle` from Python.
+
+        In-page wait_for_function() is eval'd and the app's CSP (intentionally)
+        forbids unsafe-eval, so polling has to happen outside the page.
+        """
+        deadline = time.time() + timeout
+        last = ""
+        while time.time() < deadline:
+            try:
+                last = page.text_content(selector) or ""
+            except Exception:
+                last = ""
+            if needle in last:
+                return last
+            time.sleep(0.1)
+        raise AssertionError(
+            f"{selector} never contained {needle!r} (last: {last[:160]!r})")
 
     @staticmethod
     def _launch(pw):
@@ -138,21 +228,24 @@ class UiSmokeTest(unittest.TestCase):
             browser = self._launch(pw)
             try:
                 page, errors = self._open(browser, "/", 360, 480)
-                page.wait_for_function(
-                    "document.getElementById('costWhole')"
-                    ".textContent.trim() === '18'")
+                self._wait_text(page, "#costWhole", "18")
                 self.assertIn(".74", page.text_content("#costCents"))
                 self.assertIn("Today", page.text_content("#costLabel"))
                 self.assertEqual(page.locator("#rangeTabs .rt").count(), 7)
                 self.assertIn("2", page.text_content("#liveCount"))
+                # Frameless resize grip is present + clickable.
+                self.assertTrue(page.is_visible("#resizeGrip"))
                 # The schema-driven settings render the new sections too.
                 page.click("#settingsBtn")
-                page.wait_for_function(
-                    "document.getElementById('settingsSections')"
-                    ".textContent.includes('Show mini overlay')")
+                self._wait_text(page, "#settingsSections", "Show mini overlay")
                 self.assertIn(
                     "Per-project daily caps",
                     page.text_content("#settingsSections"))
+                # ...and no longer render the settings trimmed in schema v4.
+                settings_text = page.text_content("#settingsSections")
+                self.assertNotIn("Density", settings_text)
+                self.assertNotIn("Width (px)", settings_text)
+                self.assertNotIn("Auto-hide delay", settings_text)
                 self.assertEqual(errors, [])
             finally:
                 browser.close()
@@ -162,9 +255,10 @@ class UiSmokeTest(unittest.TestCase):
             browser = self._launch(pw)
             try:
                 page, errors = self._open(browser, "/mini.html", 176, 44)
-                page.wait_for_function(
-                    "document.getElementById('mCost')"
-                    ".textContent.includes('18.74')")
+                # Defaults to the rolling 24h range (server-cached /api/range).
+                self._wait_text(page, "#cCost", "1,650")
+                self.assertEqual(page.text_content("#cRange").strip(), "24h")
+                self.assertIn("1,650", page.text_content("#fCost"))
                 self.assertIn("live", page.get_attribute("body", "class") or "")
                 self.assertEqual(errors, [])
             finally:

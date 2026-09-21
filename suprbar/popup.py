@@ -42,9 +42,17 @@ log = logging.getLogger("suprbar.popup")
 
 WIN_W = 360
 WIN_H = 480
+# Drag-resize bounds (the flyout is frameless; the UI grip drives resize()).
+MIN_W, MIN_H = 260, 320
+MAX_W, MAX_H = 800, 1200
 MARGIN_RIGHT = 12
 MARGIN_BOTTOM = 12
 SNAP_THRESHOLD = 24  # px from a work-area corner that triggers snap
+
+
+def _clamp_size(w: int, h: int) -> tuple[int, int]:
+    return (max(MIN_W, min(int(w), MAX_W)),
+            max(MIN_H, min(int(h), MAX_H)))
 
 
 # ---------- Window-state persistence (small JSON helper) ----------
@@ -433,6 +441,7 @@ class TrayBridge:
         # Debounce window-position writes during drag (was syncing JSON every
         # moved event — that stuttered badly on Win11 WebView2).
         self._pending_pos: tuple[int, int] | None = None
+        self._pending_size: tuple[int, int] | None = None
         self._move_save_timer: threading.Timer | None = None
         self._move_save_delay = 0.35
 
@@ -542,16 +551,6 @@ class TrayBridge:
                 # focus is still settling.
                 if time.monotonic() - self._show_settle_ts < self._settle_seconds:
                     return
-                # Optional user-tunable delay before hiding.
-                try:
-                    delay_ms = int(config.get_pref("behavior.auto_hide_delay_ms", 0))
-                except Exception:
-                    delay_ms = 0
-                if delay_ms > 0:
-                    import threading
-                    threading.Timer(delay_ms / 1000.0,
-                                    lambda: self.hide(from_blur=False)).start()
-                    return
             try:
                 self._window.hide()
             except Exception as e:
@@ -617,14 +616,46 @@ class TrayBridge:
         t.start()
 
     def _flush_pos_save(self) -> None:
-        pos = self._pending_pos
-        if pos is None:
+        pos, size = self._pending_pos, self._pending_size
+        self._pending_pos = None
+        self._pending_size = None
+        if pos is None and size is None:
             return
+        patch: dict = {}
         try:
-            sx, sy = _snap_to_corner(pos[0], pos[1])
-            save_window_state({"x": sx, "y": sy, "w": WIN_W, "h": WIN_H})
+            if pos is not None:
+                sx, sy = _snap_to_corner(pos[0], pos[1])
+                patch.update({"x": sx, "y": sy})
+            if size is not None:
+                patch.update({"w": size[0], "h": size[1]})
+            if patch:
+                save_window_state(patch)
         except Exception as e:
-            log.debug("pos save failed: %s", e)
+            log.debug("pos/size save failed: %s", e)
+
+    def resize(self, width: int, height: int) -> None:
+        """Resize the flyout (the UI's drag grip calls this)."""
+        global WIN_W, WIN_H
+        if not self._window:
+            return
+        w, h = _clamp_size(width, height)
+        if (w, h) == (WIN_W, WIN_H):
+            return
+        WIN_W, WIN_H = w, h
+        try:
+            self._window.resize(w, h)
+        except Exception as e:
+            log.debug("resize failed: %s", e)
+
+    def on_resized(self, width: int, height: int) -> None:
+        """Remember the size after a resize completes (debounced)."""
+        global WIN_W, WIN_H
+        try:
+            WIN_W, WIN_H = _clamp_size(int(width), int(height))
+        except (TypeError, ValueError):
+            return
+        self._pending_size = (WIN_W, WIN_H)
+        self._schedule_pos_save()
 
 
 # ---------- JS bridge exposed to the popup ----------
@@ -670,6 +701,13 @@ class JsApi:
             mini.hide()
         mini.apply_click_through()
 
+    def resize_window(self, width, height):
+        """Flyout resize grip → native resize (bridge clamps to bounds)."""
+        try:
+            self._bridge.resize(int(width), int(height))
+        except (TypeError, ValueError):
+            pass
+
     def consume_pending_open(self) -> str:
         """Frontend may poll this on load to discover a queued navigation."""
         if self._bridge._open_settings_next_show:
@@ -682,21 +720,26 @@ class JsApi:
 
 def build_window(url: str, bridge: TrayBridge) -> webview.Window:
     global WIN_W, WIN_H
-    # Resolve user prefs for window sizing / placement.
+    # Size comes from the last drag-resize (window-state.json), falling back
+    # to the design target. Placement as before.
     try:
         from . import config as _cfg
-        w_pref = int(_cfg.get_pref("window.width",  WIN_W) or WIN_W)
-        h_pref = int(_cfg.get_pref("window.height", WIN_H) or WIN_H)
         on_top = bool(_cfg.always_on_top())
     except Exception:
-        w_pref, h_pref, on_top = WIN_W, WIN_H, True
-    WIN_W, WIN_H = w_pref, h_pref
+        on_top = True
+    state = load_window_state()
+    try:
+        WIN_W, WIN_H = _clamp_size(
+            int(state.get("w") or WIN_W), int(state.get("h") or WIN_H))
+    except (TypeError, ValueError):
+        pass
     x, y = bridge._resolve_show_xy()
     w = webview.create_window(
         title="supr.bar",
         url=url,
         width=WIN_W,
         height=WIN_H,
+        min_size=(MIN_W, MIN_H),
         x=x,
         y=y,
         frameless=True,
@@ -721,6 +764,12 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         h = _hwnd_by_title("supr.bar")
         if h:
             bridge.cache_hwnd(h)
+        # WinForms autoscale can shave a few px off the requested size; apply
+        # the exact size once the window is realized.
+        try:
+            w.resize(WIN_W, WIN_H)
+        except Exception:
+            pass
         bridge._decorate()
     w.events.loaded += on_loaded
 
@@ -730,6 +779,13 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         w.events.moved += on_moved
     except (AttributeError, TypeError) as e:
         log.debug("moved event unavailable: %s", e)
+
+    def on_resized(w_new, h_new):
+        bridge.on_resized(w_new, h_new)
+    try:
+        w.events.resized += on_resized
+    except (AttributeError, TypeError) as e:
+        log.debug("resized event unavailable: %s", e)
 
     return w
 

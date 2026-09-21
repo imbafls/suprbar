@@ -138,9 +138,7 @@
 [data-theme="light"][data-accent="orange"] { --b-accent-hot: oklch(0.54 0.14 56);  }
 [data-theme="light"][data-accent="pink"]   { --b-accent-hot: oklch(0.53 0.16 8);   }
 
-/* ====================  §8d  DENSITY · SCALE · MOTION  =================== */
-body.compact  { --d: 0.72; --row-h: 28px; --pad: 10px; }
-body.spacious { --d: 1.34; --row-h: 40px; --pad: 18px; }
+/* ====================  §8d  SCALE · MOTION  ============================= */
 body.no-animations,
 body.no-animations * { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -832,6 +830,28 @@ dialog.shortcuts-help[open] { animation: dlg .24s var(--ease); }
   box-shadow: var(--b-shadow); z-index: 60;
 }
 [data-tip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ====================  DRAG-RESIZE GRIP  ============================= */
+/* The frameless window has no native resize border; this corner grip drives
+   pywebview's resize() via JS. Opts out of the drag region. */
+.resize-grip {
+  position: fixed; right: 0; bottom: 0;
+  width: 16px; height: 16px;
+  z-index: 70;
+  cursor: nwse-resize;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  opacity: 0.38;
+  transition: opacity var(--dur);
+  background: repeating-linear-gradient(135deg,
+      var(--b-dim) 0 1px, transparent 1px 4px);
+  -webkit-mask: linear-gradient(135deg, transparent 0 42%, #000 42% 100%);
+          mask: linear-gradient(135deg, transparent 0 42%, #000 42% 100%);
+  border-bottom-right-radius: var(--r-3);
+}
+.resize-grip:hover { opacity: 0.8; }
+body.resizing { cursor: nwse-resize; }
+body.resizing * { transition: none !important; }
 
 /* ====================  LOADING SKELETON helpers  ===================== */
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

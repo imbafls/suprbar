@@ -16,8 +16,9 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.14 — always-on-top **mini overlay**, working click-through,
-> per-project budgets, incremental scan tailing, and daily pricing updates.
+> **Status:** v0.15 — **resizable flyout**, a trimmed settings panel (schema v4,
+> 14 fewer toggles), and a **mini overlay showing rolling 24h** that expands on
+> hover.
 
 ## What it does
 
@@ -27,9 +28,10 @@ No login. No telemetry. Your data stays on your machine.
 - Optional **Anthropic Admin API** for org-wide actual spend (Settings → Sources).
 - Optional **Hermes** agent sessions (`~/.hermes/sessions/sessions.json`).
 - **Range filters** — today, 24h, 7d, week, month, 30d, 90d.
-- **Mini overlay** — an always-on-top chip (live dot · today's $ · burn $/h)
-  that hovers over other apps. Click it to open the flyout; drag to move;
-  optionally click-through. Toggle from the tray menu or Settings.
+- **Mini overlay** — an always-on-top chip showing **rolling 24h** (or today)
+  spend, live dot, and burn $/h. Hover to expand it into a detail card (live
+  session, messages, budget bar); click the cost to open the flyout; drag to
+  move; optionally click-through. Toggle from the tray menu or Settings.
 - **Budgets** — daily / weekly / monthly limits plus **per-project daily
   caps**, with tray warnings and system notifications when a line is crossed.
 - **Per-source breakdown** — local Claude Code, opencode, Hermes, Admin API
@@ -62,8 +64,10 @@ Requires Python 3.11+, Windows 11, and WebView2 (preinstalled on Win11).
 
 1. Launch suprbar — gradient **S** in the system tray.
 2. Open Claude Code and start a session.
-3. Click the tray icon for the flyout (cost, tokens, burn, budgets).
-4. Right-click → **Mini overlay** for the always-on-top chip.
+3. Click the tray icon for the flyout (cost, tokens, burn, budgets). Drag the
+   bottom-right grip to resize it — the size sticks.
+4. Right-click → **Mini overlay** for the always-on-top chip (24h by default;
+   hover it to expand, click the cost for the full flyout).
 5. Right-click → **Settings** for refresh, theme, sources, budgets.
 6. Set daily/weekly/monthly limits under **Budgets** if you want warnings
    (per-project caps: `project=amount` entries in the same section).

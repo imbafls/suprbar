@@ -39,7 +39,7 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DEFAULTS: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
@@ -73,25 +73,14 @@ DEFAULTS: dict[str, Any] = {
     "range": {
         "default": "today",            # today|24h|7d|week|month|30d|90d
         "week_starts_on": "mon",       # sun|mon
-        "day_boundary":  "local",      # local|utc
-        "rolling_24h":   False,        # true → last 24h instead of calendar day
-        "include_weekends": True,
     },
 
     # ---- Display prefs ----
     "display": {
         "theme":       "dark",         # dark|light|auto
         "accent":      "blue",         # violet|blue|green|orange|pink (blue = refined indigo, the redesign default)
-        "density":     "normal",       # compact|normal|spacious
         "font_scale":  1.0,            # 0.85..1.25
         "cost_format": "with_cents",   # with_cents|whole
-        "token_format": "compact",     # compact (1.2k) | full (1,234)
-        "show_token_bar":  True,
-        "show_cache_info": True,
-        "show_burn_rate":  True,
-        "show_model":      True,
-        "show_project":    True,
-        "show_sessions_today": True,
         "animations": True,            # toggle all UI animations
     },
 
@@ -117,7 +106,6 @@ DEFAULTS: dict[str, Any] = {
     "behavior": {
         "refresh_seconds":       5,    # 0=manual, else auto-refresh cadence (s)
         "auto_hide":             True, # auto-hide popup on blur
-        "auto_hide_delay_ms":    0,    # delay before auto-hide
         "always_on_top":         True,
         "live_threshold_seconds": 60,  # JSONL mtime within X = "live"
         "confirm_quit":          False,
@@ -148,12 +136,6 @@ DEFAULTS: dict[str, Any] = {
     # ---- Data / privacy ----
     "data": {
         "log_level": "INFO",           # OFF|ERROR|WARN|INFO|DEBUG
-    },
-
-    # ---- Window size ----
-    "window": {
-        "width":   360,
-        "height":  480,
     },
 }
 
@@ -234,20 +216,22 @@ def _deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> None:
             dst[k] = v
 
 
-# Settings removed in schema v3 (the v0.7 simplification). Pruned from any
-# older config on load so the on-disk file converges on the lean schema and the
-# settings UI never renders a control the backend ignores.
-_REMOVED_SECTIONS = ("keyboard",)
+# Settings removed in schema v3 (the v0.7 simplification) and v4 (the v0.15
+# settings trim). Pruned from any older config on load so the on-disk file
+# converges on the lean schema and the settings UI never renders a control the
+# backend ignores.
+_REMOVED_SECTIONS = ("keyboard", "window")
 _REMOVED_KEYS: dict[str, tuple[str, ...]] = {
-    "range":    ("compare_previous", "custom_start", "custom_end"),
-    "display":  ("currency", "locale"),
+    "range":    ("compare_previous", "custom_start", "custom_end",
+                 "day_boundary", "rolling_24h", "include_weekends"),
+    "display":  ("currency", "locale", "density", "token_format",
+                 "show_token_bar", "show_cache_info", "show_burn_rate",
+                 "show_model", "show_project", "show_sessions_today"),
     "budgets":  ("audio_alert", "quiet_hours", "quiet_start", "quiet_end"),
     "behavior": ("show_in_taskbar", "start_minimized", "single_instance",
-                 "open_dashboard_on_click"),
+                 "open_dashboard_on_click", "auto_hide_delay_ms"),
     "data":     ("log_retention_days", "anonymize_logs", "cache_ttl_seconds",
                  "telemetry"),
-    "window":   ("anchor", "margin_px", "preferred_monitor",
-                 "remember_position", "opacity"),
     "sources":  ("cost_mode",),
 }
 _VALID_RANGE_DEFAULTS = ("today", "24h", "7d", "week", "month", "30d", "90d")
@@ -291,6 +275,14 @@ def _migrate(d: dict[str, Any]) -> dict[str, Any]:
         _prune_removed_keys(d)
         d["schema_version"] = 3
         log.info("config migrated to schema_version=3")
+    if d.get("schema_version") == 3:
+        # v3 → v4: trim 14 niche toggles (utc day boundary, weekend filter,
+        # token formatting, per-element visibility, auto-hide delay, density,
+        # fixed window size) — the window is drag-resizable and the glance UI
+        # already curates what to show.
+        _prune_removed_keys(d)
+        d["schema_version"] = 4
+        log.info("config migrated to schema_version=4")
     return d
 
 
@@ -383,23 +375,12 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     # range
     "range.default":          ("enum", ("today", "24h", "7d", "week", "month", "30d", "90d")),
     "range.week_starts_on":   ("enum", ("sun", "mon")),
-    "range.day_boundary":     ("enum", ("local", "utc")),
-    "range.rolling_24h":      ("bool", None),
-    "range.include_weekends": ("bool", None),
 
     # display
     "display.theme":          ("enum", ("dark", "light", "auto")),
     "display.accent":         ("enum", ("violet", "blue", "green", "orange", "pink")),
-    "display.density":        ("enum", ("compact", "normal", "spacious")),
     "display.font_scale":     ("float", (0.85, 1.25)),
     "display.cost_format":    ("enum", ("with_cents", "whole")),
-    "display.token_format":   ("enum", ("compact", "full")),
-    "display.show_token_bar":     ("bool", None),
-    "display.show_cache_info":    ("bool", None),
-    "display.show_burn_rate":     ("bool", None),
-    "display.show_model":         ("bool", None),
-    "display.show_project":       ("bool", None),
-    "display.show_sessions_today": ("bool", None),
     "display.animations":         ("bool", None),
 
     # budgets
@@ -414,7 +395,6 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     # behavior
     "behavior.refresh_seconds":      ("int", (0, 3600)),
     "behavior.auto_hide":            ("bool", None),
-    "behavior.auto_hide_delay_ms":   ("int", (0, 10000)),
     "behavior.always_on_top":        ("bool", None),
     "behavior.live_threshold_seconds": ("int", (5, 600)),
     "behavior.confirm_quit":         ("bool", None),
@@ -441,10 +421,6 @@ SCHEMA: dict[str, tuple[str, Any]] = {
     "updates.check_on_launch": ("bool", None),
     "updates.last_check":      ("str", None),
     "updates.skip_version":    ("str", None),
-
-    # window
-    "window.width":             ("int", (260, 800)),
-    "window.height":            ("int", (320, 1200)),
 
     # tray + startup
     "ui.pinned":         ("bool", None),

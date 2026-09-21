@@ -167,9 +167,6 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
         custom_start or "",
         custom_end or "",
         rng.get("week_starts_on", "mon"),
-        rng.get("day_boundary", "local"),
-        bool(rng.get("rolling_24h", False)),
-        bool(rng.get("include_weekends", True)),
         tuple(proj.get("allowlist") or []),
         tuple(proj.get("denylist")  or []),
         bool(proj.get("anonymize", False)),
@@ -184,12 +181,9 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
         custom_start=custom_start,
         custom_end=custom_end,
         week_starts_on=rng.get("week_starts_on", "mon"),
-        day_boundary=rng.get("day_boundary", "local"),
-        rolling_24h=bool(rng.get("rolling_24h", False)),
         allowlist=list(proj.get("allowlist") or []),
         denylist=list(proj.get("denylist")  or []),
         anonymize=bool(proj.get("anonymize", False)),
-        include_weekends=bool(rng.get("include_weekends", True)),
     )
     _range_cache[cache_key] = {"data": data, "ts": now}
     return data

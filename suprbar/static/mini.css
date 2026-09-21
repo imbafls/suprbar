@@ -2,14 +2,16 @@
    supr.bar — mini overlay (always-on-top HUD)
    Reuses styles.css tokens. The window is frameless + opaque; DWM rounds the
    HWND, CSS rounds the body to match. Whole surface drags (easy_drag) except
-   the cost area and the dismiss button, which are -webkit-app-region: no-drag.
+   interactive controls, which are -webkit-app-region: no-drag.
+
+   Two layouts, swapped by body.expanded (driven from JS on hover, with the
+   native window growing via pywebview):
+     .m-compact  — 176x44 chip: pip · cost · range tag · burn · ×
+     .m-full     — 208x118 card: live line, big cost, range chips, meta, budget
    ========================================================================== */
 
 body.mini {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px 0 12px;
+  padding: 0;
   background: var(--b-surface);
   border: 1px solid var(--b-line-2);
   border-radius: 10px;
@@ -17,6 +19,7 @@ body.mini {
   app-region: drag;
   user-select: none;
   cursor: grab;
+  overflow: hidden;
 }
 body.mini:active { cursor: grabbing; }
 
@@ -26,6 +29,7 @@ body.mini .pip {
   border-radius: 50%;
   background: var(--b-faint);
   transition: background var(--dur);
+  margin: 0 1px 0 0;
 }
 body.mini.live .pip {
   background: var(--b-success);
@@ -38,35 +42,41 @@ body.mini.live .pip {
 }
 body.mini.no-animations .pip { animation: none !important; }
 
-/* cost + burn — the click target that opens the full flyout */
-body.mini .open {
+/* shared controls */
+body.mini .cost {
   all: unset;
   -webkit-app-region: no-drag;
   app-region: no-drag;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 5px;
 }
-body.mini .open:focus-visible { outline: var(--b-ring); }
-body.mini .open .cost {
-  font-size: 15px;
+body.mini .cost:focus-visible { outline: var(--b-ring); }
+body.mini .cost .num {
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--b-text);
   font-variant-numeric: tabular-nums;
 }
-body.mini .open .burn {
-  font-size: 10.5px;
-  color: var(--b-dim);
+body.mini .range {
+  all: unset;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  cursor: pointer;
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--b-dimmer);
+  border: 1px solid var(--b-line);
+  border-radius: 4px;
+  padding: 2px 4px;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
-
-/* dismiss — revealed on hover only */
+body.mini .range:hover { color: var(--b-dim); border-color: var(--b-line-2); }
+body.mini .range:focus-visible { outline: var(--b-ring); }
+body.mini .range.on {
+  color: var(--b-accent-hot);
+  border-color: var(--b-accent-line);
+  background: var(--b-accent-ghost);
+}
 body.mini .x {
   all: unset;
   -webkit-app-region: no-drag;
@@ -84,8 +94,83 @@ body.mini .x {
   transition: opacity var(--dur), background var(--dur), color var(--dur);
 }
 body.mini:hover .x { opacity: 1; }
+body.mini.expanded .x { opacity: 1; }
 body.mini .x:hover { background: var(--b-surface-3); color: var(--b-text); }
 body.mini .x:focus-visible { outline: var(--b-ring); opacity: 1; }
+
+/* ---- compact chip ---- */
+.m-compact {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 100%;
+  padding: 0 7px 0 12px;
+}
+body.mini.expanded .m-compact { display: none; }
+.m-compact .cost .num { font-size: 15px; }
+.m-compact .burn {
+  font-size: 10.5px;
+  color: var(--b-dim);
+  white-space: nowrap;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- expanded card ---- */
+.m-full {
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  height: 100%;
+  padding: 8px 9px 9px 12px;
+}
+body.mini.expanded .m-full { display: flex; }
+.m-full .top { display: flex; align-items: center; gap: 7px; }
+.m-full .top .live {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--b-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-full .costrow { display: flex; align-items: baseline; gap: 6px; }
+.m-full .costrow .cost { margin-right: auto; }
+.m-full .costrow .cost .num { font-size: 22px; }
+.m-full .meta {
+  display: flex;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--b-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.m-full .budget { display: flex; align-items: center; gap: 7px; }
+.m-full .budget .bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--b-surface-3);
+  overflow: hidden;
+}
+.m-full .budget .bar span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: var(--b-accent);
+  transition: width var(--dur);
+}
+.m-full .budget .bar span.warn { background: var(--b-warn); }
+.m-full .budget .bar span.over { background: var(--b-danger); }
+.m-full .budget .txt {
+  font-size: 10px;
+  color: var(--b-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 /* server unreachable — dim the whole chip */
 body.mini.offline { opacity: 0.55; }

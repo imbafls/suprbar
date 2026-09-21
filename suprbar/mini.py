@@ -35,16 +35,19 @@ log = logging.getLogger("suprbar.mini")
 
 MINI_W = 176
 MINI_H = 44
+MINI_W_EXPANDED = 208
+MINI_H_EXPANDED = 118
 MINI_TITLE = "supr.bar mini"
 MINI_MARGIN = 12
 SNAP_THRESHOLD = 24  # px from a work-area corner that triggers a snap
 
 
-def _clamp(x: int, y: int, wa: tuple[int, int, int, int]) -> tuple[int, int]:
+def _clamp(x: int, y: int, wa: tuple[int, int, int, int],
+           w: int = MINI_W, h: int = MINI_H) -> tuple[int, int]:
     """Clamp (x, y) so the overlay stays fully inside the work area."""
     l, t, r, b = wa
-    max_x = max(l, r - MINI_W - 1)
-    max_y = max(t, b - MINI_H - 1)
+    max_x = max(l, r - w - 1)
+    max_y = max(t, b - h - 1)
     return max(l, min(x, max_x)), max(t, min(y, max_y))
 
 
@@ -80,6 +83,7 @@ class MiniBridge:
         self._pending_pos: tuple[int, int] | None = None
         self._move_save_timer: threading.Timer | None = None
         self._move_save_delay = 0.35
+        self._expanded = False
 
     # ---- wiring ----
 
@@ -157,6 +161,9 @@ class MiniBridge:
         if not self._window:
             return
         with self._lock:
+            # Always come back collapsed: a stale expanded size must not make
+            # the chip reappear as a card.
+            self._collapse_if_expanded()
             x, y = self._resolve_show_xy()
             try:
                 self._window.move(x, y)
@@ -173,6 +180,7 @@ class MiniBridge:
         if not self._window:
             return
         with self._lock:
+            self._collapse_if_expanded()
             try:
                 self._window.hide()
             except Exception as e:
@@ -196,6 +204,55 @@ class MiniBridge:
 
     def is_visible(self) -> bool:
         return self._visible
+
+    # ---- hover expansion ----
+
+    def _current_xy(self) -> tuple[int, int]:
+        """Best-known window origin (live if the backend exposes it)."""
+        try:
+            if self._window is not None:
+                return int(self._window.x), int(self._window.y)
+        except Exception:
+            pass
+        if self._pending_pos:
+            return self._pending_pos
+        return self._resolve_show_xy()
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Grow/shrink the overlay (hover), anchored to its right edge."""
+        if not self._window:
+            return
+        expanded = bool(expanded)
+        if expanded == self._expanded:
+            return
+        with self._lock:
+            x, y = self._current_xy()
+            w = MINI_W_EXPANDED if expanded else MINI_W
+            h = MINI_H_EXPANDED if expanded else MINI_H
+            dx = MINI_W_EXPANDED - MINI_W
+            nx = x - dx if expanded else x + dx
+            nx, ny = _clamp(nx, y,
+                            _work_area_for_point(x + MINI_W // 2,
+                                                 y + MINI_H // 2),
+                            w, h)
+            try:
+                self._window.resize(w, h)
+            except Exception as e:
+                log.debug("mini resize failed: %s", e)
+            try:
+                self._window.move(nx, ny)
+            except Exception as e:
+                log.debug("mini move failed: %s", e)
+            self._expanded = expanded
+
+    def _collapse_if_expanded(self) -> None:
+        if self._expanded:
+            self._expanded = False
+            try:
+                if self._window is not None:
+                    self._window.resize(MINI_W, MINI_H)
+            except Exception:
+                pass
 
     def apply_click_through(self) -> None:
         """Sync overlay mouse-input transparency to mini.click_through."""
@@ -221,6 +278,10 @@ class MiniJsApi:
     def hide(self):
         # Explicit dismiss: persist so the overlay doesn't return next launch.
         self._bridge.hide(persist=True)
+
+    def expand(self, on=True):
+        """Hover in/out: grow the chip into the detail card (and back)."""
+        self._bridge.set_expanded(bool(on))
 
 
 def build_window(url_base: str, bridge: MiniBridge) -> webview.Window:

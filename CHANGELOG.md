@@ -1,5 +1,41 @@
 # supr.bar CHANGELOG
 
+## v0.15.0 — mini overlay v2, a resizable flyout, and 14 fewer settings
+
+### Mini overlay v2
+- **Rolling 24h by default.** The chip now shows the last 24 hours of spend
+  instead of only today's, with a one-click switch between 24h and Today (the
+  choice is remembered). The collapsed chip carries the range tag so the
+  number is unambiguous.
+- **Hover to expand.** The chip grows into a card showing the live session
+  (project or count), a larger cost readout, burn rate + message count, and
+  the relevant budget bar when a limit is set. Leaving shrinks it back to a
+  chip. The right edge stays anchored while it grows, so it never jumps.
+- Clicking the cost still opens the full flyout.
+
+### Resizable flyout
+- **Drag the corner grip** to size the window from 260×320 up to 800×1200;
+  the size is remembered across launches. The old fixed Window →
+  Width/Height settings are gone.
+- Fixed: the window opened ~4% smaller than requested (WinForms DPI
+  autoscale); the exact size is applied once the window is realized.
+
+### Settings: 14 fewer, and the one dead toggle is wired
+- Removed: day boundary, rolling-24h "today", include weekends, token format,
+  the six per-element visibility toggles (token bar, cache info, burn, model,
+  project, session count), density, auto-hide delay, and the fixed window
+  size. The glance UI already curates what's shown, and drag-resizing
+  replaces the density setting.
+- Fixed: **Default range** was exposed in the panel but never read. It now
+  applies on first run; your last-viewed tab still wins afterwards.
+- Schema **v4** migration prunes the removed keys from existing configs, and
+  a unit test guards the migration.
+
+### Tooling
+- New `tests/test_config_migration.py`, plus the headless UI smoke now covers
+  the resizable grip, the trimmed settings panel, and the mini overlay's 24h
+  default.
+
 ## v0.14.1 — scan tail counters in diagnostics
 
 - `/api/diagnostics` → `cache_meta` now exposes `files_tailed` and

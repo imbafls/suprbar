@@ -4,19 +4,52 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>supr.bar mini</title>
-  <!-- Reuse the flyout token system; mini.css only adds the chip layout. -->
+  <!-- Reuse the flyout token system; mini.css adds the chip + card layouts. -->
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/mini.css" />
 </head>
-<body class="mini loading">
-  <span class="pip" id="pip" aria-hidden="true"></span>
-  <button class="open" id="openZone" type="button"
-          title="Open supr.bar" aria-label="Open supr.bar">
-    <span class="cost" id="mCost">$0.00</span>
-    <span class="burn" id="mBurn" hidden></span>
-  </button>
-  <button class="x" id="closeBtn" type="button"
-          title="Hide overlay" aria-label="Hide overlay">&#215;</button>
+<body class="mini loading" data-range="24h">
+  <!-- compact chip (default) -->
+  <div class="m-compact">
+    <span class="pip" aria-hidden="true"></span>
+    <button class="cost" id="cZone" type="button"
+            title="Open supr.bar" aria-label="Open supr.bar">
+      <span class="num" id="cCost">$0.00</span>
+    </button>
+    <button class="range" id="cRange" type="button"
+            title="Switch range (24h / today)">24h</button>
+    <span class="burn" id="cBurn"></span>
+    <button class="x" id="closeBtn" type="button"
+            title="Hide overlay" aria-label="Hide overlay">&#215;</button>
+  </div>
+
+  <!-- hover-expanded card -->
+  <div class="m-full">
+    <div class="top">
+      <span class="pip" aria-hidden="true"></span>
+      <span class="live" id="fLive">idle</span>
+      <button class="x" id="closeBtn2" type="button"
+              title="Hide overlay" aria-label="Hide overlay">&#215;</button>
+    </div>
+    <div class="costrow">
+      <button class="cost" id="fZone" type="button"
+              title="Open supr.bar" aria-label="Open supr.bar">
+        <span class="num" id="fCost">$0.00</span>
+      </button>
+      <button class="range" id="fRange24" type="button" data-range="24h">24h</button>
+      <button class="range" id="fRangeToday" type="button" data-range="today">Today</button>
+    </div>
+    <div class="meta">
+      <span id="fBurn"></span>
+      <span class="sep" id="fSep" hidden>&#183;</span>
+      <span id="fMsgs"></span>
+    </div>
+    <div class="budget" id="fBudget" hidden>
+      <div class="bar"><span id="fBudgetBar"></span></div>
+      <span class="txt" id="fBudgetTxt"></span>
+    </div>
+  </div>
+
   <script src="/mini.js"></script>
 </body>
 </html>
