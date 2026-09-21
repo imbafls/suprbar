@@ -159,7 +159,11 @@ async function tick() {
 function schedule() {
   if (timer) clearTimeout(timer);
   const live = document.body.classList.contains('live');
-  timer = setTimeout(tick, live ? 5000 : 30000);
+  const offline = document.body.classList.contains('offline');
+  // Until the first payload lands (cold startup scan can take a while) and
+  // while offline, retry quickly instead of waiting out an idle interval.
+  const ms = (live || !todayData) ? 5000 : (offline ? 10000 : 30000);
+  timer = setTimeout(tick, ms);
 }
 
 function setRange(next) {

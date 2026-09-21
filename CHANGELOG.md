@@ -1,5 +1,18 @@
 # supr.bar CHANGELOG
 
+## v0.15.3 — quieter, faster startup
+
+- **The hidden flyout no longer forces a refresh at boot.** That refresh
+  invalidated the cache while the tray's first scan was already running, so
+  every launch performed two full corpus scans back to back — a big part of
+  the "slow/stuck" first minute after launch. The flyout now rides the tray's
+  scan at boot and forces a refresh when it is actually opened (focus).
+- **Budget polling pauses while the flyout is hidden** and refreshes on open,
+  so configurations with limits no longer re-scan in the background forever.
+- **The mini overlay retries quickly (5s) until its first payload lands and
+  while offline**, instead of showing a placeholder for a full idle interval
+  after a slow startup scan.
+
 ## v0.15.2 — fix the blank flyout on startup
 
 - **Fixed: the flyout could appear as an empty dark window on launch** (and

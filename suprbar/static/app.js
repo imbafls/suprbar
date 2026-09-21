@@ -1556,9 +1556,10 @@ document.addEventListener('visibilitychange', () => {
   } else {
     setPollInterval(pollBaseMs || POLL_MS_ACTIVE);
     load({ refresh: true });
+    loadBudgets();
   }
 });
-window.addEventListener('focus', () => load({ refresh: true }));
+window.addEventListener('focus', () => { load({ refresh: true }); loadBudgets(); });
 
 // ───────────────────────── Drag-resize grip (frameless) ─────────────────────────
 // The window has no native resize border (FormBorderStyle.None); dragging the
@@ -1609,7 +1610,10 @@ window.addEventListener('focus', () => load({ refresh: true }));
 // ───────────────────────── Initial boot ─────────────────────────
 
 document.body.classList.add('loading');                // matches CSS skeleton, removed after #20
-load({ refresh: true });
+// No refresh=1 here: the tray is already scanning at launch, and forcing a
+// refresh invalidated its in-flight result — two full corpus scans back to
+// back on every start. A forced refresh happens when the flyout gets focus.
+load();
 loadConfig();
 loadVersion();
 loadUpdateStatus();
@@ -2083,7 +2087,9 @@ function maybeNotifyBudget(active) {
   _budgetNotified[active.key] = state;
 }
 
-setInterval(loadBudgets, 30_000);
+// Budgets only matter while the flyout is visible; a hidden window polling
+// them forever re-scans for users who set limits (shown/focus refresh them).
+setInterval(() => { if (!document.hidden) loadBudgets(); }, 30_000);
 loadBudgets();
 
 // ──── Apply display prefs to the DOM ────
