@@ -236,7 +236,7 @@ def today() -> dict[str, Any]:
     try:
         scan_meta = scanner.cache_meta()
     except Exception:
-        scan_meta = {"files_reused": 0, "files_reparsed": 0,
+        scan_meta = {"files_reused": 0, "files_reparsed": 0, "files_tailed": 0,
                      "last_scan_ms": 0, "parse_errors": 0}
 
     today_payload = {
@@ -275,7 +275,9 @@ def today() -> dict[str, Any]:
         "cache_meta": {
             "files_reused": int(scan_meta.get("files_reused", 0)),
             "files_reparsed": int(scan_meta.get("files_reparsed", 0)),
+            "files_tailed": int(scan_meta.get("files_tailed", 0)),
             "last_scan_ms": int(scan_meta.get("last_scan_ms", elapsed_ms)),
+            "parse_errors": int(scan_meta.get("parse_errors", parse_errors)),
         },
     }
 

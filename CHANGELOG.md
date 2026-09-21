@@ -1,5 +1,12 @@
 # supr.bar CHANGELOG
 
+## v0.14.1 — scan tail counters in diagnostics
+
+- `/api/diagnostics` → `cache_meta` now exposes `files_tailed` and
+  `parse_errors` alongside `files_reused` / `files_reparsed`, making the
+  incremental-tail saving from v0.14.0 visible (the scanner tracked it
+  internally, the aggregator just didn't forward it).
+
 ## v0.14.0 — mini overlay + click-through, tailed scans, per-project budgets
 
 A quality-of-life release: a tiny always-on-top overlay so the number is
