@@ -29,6 +29,8 @@ from .popup import (
     load_window_state,
     save_window_state,
     set_click_through,
+    set_window_pos_size,
+    set_window_size,
 )
 
 log = logging.getLogger("suprbar.mini")
@@ -235,24 +237,15 @@ class MiniBridge:
                             _work_area_for_point(x + MINI_W // 2,
                                                  y + MINI_H // 2),
                             w, h)
-            try:
-                self._window.resize(w, h)
-            except Exception as e:
-                log.debug("mini resize failed: %s", e)
-            try:
-                self._window.move(nx, ny)
-            except Exception as e:
-                log.debug("mini move failed: %s", e)
+            # Our own SetWindowPos (no SWP_SHOWWINDOW): pywebview's resize()
+            # would un-hide the overlay if it were hidden.
+            set_window_pos_size(self._resolve_hwnd(), nx, ny, w, h)
             self._expanded = expanded
 
     def _collapse_if_expanded(self) -> None:
         if self._expanded:
             self._expanded = False
-            try:
-                if self._window is not None:
-                    self._window.resize(MINI_W, MINI_H)
-            except Exception:
-                pass
+            set_window_size(self._resolve_hwnd(), MINI_W, MINI_H)
 
     def apply_click_through(self) -> None:
         """Sync overlay mouse-input transparency to mini.click_through."""

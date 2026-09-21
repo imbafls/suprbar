@@ -338,6 +338,56 @@ def set_click_through(hwnd: int, enabled: bool) -> None:
         log.debug("click-through toggle failed: %s", e)
 
 
+def _dpi_scale(hwnd: int) -> float:
+    """Physical/logical pixel scale for the window (1.0 when unknown)."""
+    if sys.platform != "win32" or not hwnd:
+        return 1.0
+    try:
+        dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
+        if dpi:
+            return dpi / 96.0
+    except (OSError, AttributeError):
+        pass
+    return 1.0
+
+
+# SetWindowPos flags: NOMOVE | NOZORDER | NOACTIVATE. Deliberately never
+# SWP_SHOWWINDOW — pywebview's own Window.resize() passes it (64), which
+# force-shows hidden windows and left the flyout painted-blank on startup.
+_SWP_NOMOVE_NOZORDER_NOACTIVATE = 0x0002 | 0x0004 | 0x0010
+_SWP_NOZORDER_NOACTIVATE = 0x0004 | 0x0010
+
+
+def set_window_size(hwnd: int, width: int, height: int) -> None:
+    """Resize a window without showing or moving it (frameless drag-resize)."""
+    if sys.platform != "win32" or not hwnd:
+        return
+    try:
+        s = _dpi_scale(hwnd)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, None, 0, 0, int(width * s), int(height * s),
+            _SWP_NOMOVE_NOZORDER_NOACTIVATE,
+        )
+    except OSError as e:
+        log.debug("set_window_size failed: %s", e)
+
+
+def set_window_pos_size(hwnd: int, x: int, y: int,
+                        width: int, height: int) -> None:
+    """Move + resize a window without showing it (mini hover expansion)."""
+    if sys.platform != "win32" or not hwnd:
+        return
+    try:
+        s = _dpi_scale(hwnd)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, None, int(x * s), int(y * s),
+            int(width * s), int(height * s),
+            _SWP_NOZORDER_NOACTIVATE,
+        )
+    except OSError as e:
+        log.debug("set_window_pos_size failed: %s", e)
+
+
 # ---------- Single-instance mutex ----------
 
 _mutex_handle: int | None = None
@@ -438,6 +488,9 @@ class TrayBridge:
         self._open_settings_next_show = False
         # Mini overlay bridge (attached by run() below). None until then.
         self.mini: MiniBridge | None = None
+        # One-shot: enforce the exact window size on first show (WinForms
+        # autoscale shrinks the created window slightly).
+        self._size_applied = False
         # Debounce window-position writes during drag (was syncing JSON every
         # moved event — that stuttered badly on Win11 WebView2).
         self._pending_pos: tuple[int, int] | None = None
@@ -532,6 +585,12 @@ class TrayBridge:
             except Exception as e:
                 log.debug("show failed: %s", e)
             self._decorate()
+            # WinForms autoscale can shave a few px off the requested size;
+            # enforce the exact size once on the first show (safe here — the
+            # window is already visible, and this never force-shows).
+            if not self._size_applied:
+                set_window_size(self._resolve_hwnd(), WIN_W, WIN_H)
+                self._size_applied = True
             self._visible = True
             self._show_settle_ts = time.monotonic()
             save_window_state({"last_visible": time.time()})
@@ -634,7 +693,11 @@ class TrayBridge:
             log.debug("pos/size save failed: %s", e)
 
     def resize(self, width: int, height: int) -> None:
-        """Resize the flyout (the UI's drag grip calls this)."""
+        """Resize the flyout (the UI's drag grip calls this).
+
+        Uses our own SetWindowPos, not Window.resize() — pywebview's version
+        passes SWP_SHOWWINDOW and would un-hide a hidden flyout.
+        """
         global WIN_W, WIN_H
         if not self._window:
             return
@@ -642,10 +705,7 @@ class TrayBridge:
         if (w, h) == (WIN_W, WIN_H):
             return
         WIN_W, WIN_H = w, h
-        try:
-            self._window.resize(w, h)
-        except Exception as e:
-            log.debug("resize failed: %s", e)
+        set_window_size(self._resolve_hwnd(), w, h)
 
     def on_resized(self, width: int, height: int) -> None:
         """Remember the size after a resize completes (debounced)."""
@@ -764,12 +824,6 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         h = _hwnd_by_title("supr.bar")
         if h:
             bridge.cache_hwnd(h)
-        # WinForms autoscale can shave a few px off the requested size; apply
-        # the exact size once the window is realized.
-        try:
-            w.resize(WIN_W, WIN_H)
-        except Exception:
-            pass
         bridge._decorate()
     w.events.loaded += on_loaded
 

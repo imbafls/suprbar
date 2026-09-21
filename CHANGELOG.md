@@ -1,5 +1,19 @@
 # supr.bar CHANGELOG
 
+## v0.15.2 — fix the blank flyout on startup
+
+- **Fixed: the flyout could appear as an empty dark window on launch** (and
+  refuse to render anything until restarted). The v0.15.0 "apply exact size"
+  step used pywebview's `Window.resize()`, which passes `SWP_SHOWWINDOW` —
+  force-showing the hidden flyout before WebView2 had painted.
+- All programmatic resizing (the drag grip, the startup size correction, and
+  the mini overlay's hover expansion) now goes through our own `SetWindowPos`
+  that never shows a window. The exact-size correction is applied on first
+  show instead of on load.
+- Verified end to end: the flyout stays hidden until opened, opens at exactly
+  360×480, keeps rendering through resizes, and the overlay still expands and
+  collapses cleanly.
+
 ## v0.15.1 — rolling 24h without range scans, and much faster range scans
 
 - **The mini overlay's 24h number no longer triggers a range scan.** It is now
