@@ -197,6 +197,9 @@ def today() -> dict[str, Any]:
     sessions_today = int(local_extras.get("sessions_today", 0) or 0)
     projects_today = int(local_extras.get("projects_today", 0) or 0)
     top_model_today = local_extras.get("top_model_today")
+    # Rolling 24h comes from the local scanner only (same scope as the range
+    # tabs, which read ~/.claude). Other sources are daily-grained.
+    rolling_24h = local_extras.get("rolling_24h")
 
     # Fold in non-local extras so the flyout shows all sources' usage.
     # by_model / by_project rows are merged by key so the same model or
@@ -271,6 +274,7 @@ def today() -> dict[str, Any]:
         "by_project": by_project,
         "by_model": by_model,
         "hourly": hourly,
+        "rolling_24h": rolling_24h,
         "parse_errors": parse_errors,
         "cache_meta": {
             "files_reused": int(scan_meta.get("files_reused", 0)),

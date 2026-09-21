@@ -83,10 +83,10 @@ _TODAY_TTL_IDLE = 30.0
 _today_lock = threading.Lock()
 
 # /api/range cache — keyed by a fingerprint that includes filters so a config
-# change invalidates automatically. 30s TTL → clicking between tabs is instant
-# after the first miss for each tab.
+# change invalidates automatically. 60s TTL → clicking between tabs is instant
+# after the first miss for each tab (range scans are the expensive ones).
 _range_cache: dict[str, dict] = {}
-_RANGE_TTL = 30.0
+_RANGE_TTL = 60.0
 
 # Process-level state for diagnostics/health.
 _PROCESS_STARTED = time.monotonic()
@@ -137,6 +137,17 @@ def invalidate_today_cache() -> None:
     p_anthropic_api.invalidate_cache()
     p_openrouter.invalidate_cache()
     p_openai.invalidate_cache()
+
+
+def invalidate_today_only() -> None:
+    """Bust just the /api/today cache (tray poll path).
+
+    Kept separate from invalidate_today_cache() so the periodic tray refresh
+    doesn't also nuke the range/report/provider caches — those are expensive
+    to rebuild and don't need busting every 30s.
+    """
+    _today_cache["data"] = None
+    _today_cache["ts"] = 0.0
 
 
 # /report + /api/report payload cache. build_report() runs TWO full range scans

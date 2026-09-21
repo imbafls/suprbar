@@ -175,6 +175,7 @@ def _empty_acc() -> dict[str, Any]:
         "hourly": [{"hour": h, "cost": 0.0, "tokens": 0, "messages": 0}
                    for h in range(24)],
         "by_model": {},
+        "rolling": {},
         "parse_errors": 0,
     }
 
@@ -198,12 +199,21 @@ def _acc_from_result(result: dict[str, Any]) -> dict[str, Any]:
         acc["hourly"] = [dict(h) for h in hourly]
     by_model = result.get("by_model") or {}
     acc["by_model"] = {m: dict(v) for m, v in by_model.items()}
+    rolling = result.get("rolling") or {}
+    acc["rolling"] = {int(k): list(v) for k, v in rolling.items()}
     return acc
 
 
-def _fold_lines(lines, midnight_utc: datetime, acc: dict[str, Any]) -> None:
-    """Fold JSONL text lines into *acc* (mutates it). Shared by full + tail."""
+def _fold_lines(lines, midnight_utc: datetime, acc: dict[str, Any],
+                rolling_cutoff_min: int | None = None) -> None:
+    """Fold JSONL text lines into *acc* (mutates it). Shared by full + tail.
+
+    When ``rolling_cutoff_min`` is set, usage in the last ~25h is also bucketed
+    per minute (epoch-minute key) so a rolling-24h window can be summed from
+    cache without re-reading files.
+    """
     by_model: dict[str, dict[str, float]] = acc["by_model"]
+    rolling: dict[int, list] = acc["rolling"]
     for raw in lines:
         line = raw.strip()
         if not line:
@@ -240,10 +250,27 @@ def _fold_lines(lines, midnight_utc: datetime, acc: dict[str, Any]) -> None:
         usage = msg.get("usage")
         if not usage:
             continue
-        if dt < midnight_utc:
+        minute = int(dt.timestamp()) // 60
+        in_rolling = (rolling_cutoff_min is not None
+                      and minute >= rolling_cutoff_min)
+        is_today = dt >= midnight_utc
+        if not is_today and not in_rolling:
             continue
         model = msg.get("model") or ""
         fields = _extract_usage_fields(usage, model)
+        # Rolling window includes the pre-midnight tail of the last 24h.
+        if in_rolling:
+            rb = rolling.get(minute)
+            if rb is None:
+                rb = [0.0, 0, 0]
+                rolling[minute] = rb
+            rb[0] += fields["cost"]
+            rb[1] += 1
+            rb[2] += (fields["input"] + fields["output"]
+                      + fields["cache_5m"] + fields["cache_1h"]
+                      + fields["cache_read"])
+        if not is_today:
+            continue
         _add(acc["today_totals"], fields)
         _add(acc["sess_today_fields"], fields)
         acc["sess_cost_today"] += fields["cost"]
@@ -276,7 +303,9 @@ def _fold_lines(lines, midnight_utc: datetime, acc: dict[str, Any]) -> None:
 
 def _scan_one_file(path: Path, midnight_utc: datetime,
                    start_offset: int = 0,
-                   base: dict[str, Any] | None = None) -> tuple[dict[str, Any], int]:
+                   base: dict[str, Any] | None = None,
+                   rolling_cutoff_min: int | None = None,
+                   ) -> tuple[dict[str, Any], int]:
     """Parse one JSONL (from ``start_offset``, or the whole file) for today.
 
     Streaming binary read: memory stays bounded on huge sessions and we get an
@@ -303,7 +332,7 @@ def _scan_one_file(path: Path, midnight_utc: datetime,
                 buf = parts.pop()
                 if parts:
                     _fold_lines((p.decode("utf-8", "ignore") for p in parts),
-                                midnight_utc, acc)
+                                midnight_utc, acc, rolling_cutoff_min)
     except OSError:
         return {"ok": False, "parse_errors": acc["parse_errors"]}, start_offset
 
@@ -345,6 +374,12 @@ def today_summary() -> dict[str, Any]:
         lambda: {"cost": 0.0, "messages": 0, "tokens": 0, "cache_read": 0})
     # session_id -> dict of session info
     sessions: dict[str, dict] = {}
+    # Rolling-window minute buckets (epoch minute -> [cost, messages, tokens])
+    # summed across files; used for the overlay's "last 24h" number without a
+    # range rescan. Keep 25h of history so pruning can't clip the window.
+    rolling_global: dict[int, list] = {}
+    rolling_cutoff_min = int((now.timestamp() - 25 * 3600) // 60)
+    now_minute = int(now.timestamp()) // 60
     # project name -> aggregate
     by_project: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"cost": 0.0, "messages": 0, "tokens": 0,
@@ -412,7 +447,7 @@ def today_summary() -> dict[str, Any]:
                         base = cached_entry.get("result")
                         tail_keys.add(str(p))
                 futs[ex.submit(_scan_one_file, p, midnight_utc,
-                               start, base)] = p
+                               start, base, rolling_cutoff_min)] = p
             for fut, p in futs.items():
                 try:
                     parsed_results[str(p)] = fut.result()
@@ -457,6 +492,21 @@ def today_summary() -> dict[str, Any]:
                 by_model_global[m]["messages"] += agg["messages"]
                 by_model_global[m]["tokens"] += agg["tokens"]
                 by_model_global[m]["cache_read"] += agg.get("cache_read", 0)
+
+            # Rolling minutes: prune aged buckets from the cached result (bounds
+            # memory on a long-running process) and fold the rest globally.
+            rb = result.get("rolling") or {}
+            if rb:
+                for stale in [k for k in rb if k < rolling_cutoff_min]:
+                    del rb[stale]
+                for minute, v in rb.items():
+                    g = rolling_global.get(minute)
+                    if g is None:
+                        rolling_global[minute] = [v[0], v[1], v[2]]
+                    else:
+                        g[0] += v[0]
+                        g[1] += v[1]
+                        g[2] += v[2]
 
             sess_last_ts = result["sess_last_ts"]
             if sess_last_ts is None:
@@ -557,6 +607,18 @@ def today_summary() -> dict[str, Any]:
         _last_scan_meta["last_scan_ms"] = elapsed_ms
         _last_scan_meta["parse_errors"] = parse_errors_total
 
+    # Rolling 24h: sum minute buckets inside the window (minute-aligned, so
+    # it's exact to the minute — no separate range scan needed).
+    window_min = now_minute - 24 * 60
+    r_cost = 0.0
+    r_msgs = 0
+    r_tokens = 0
+    for minute, v in rolling_global.items():
+        if minute >= window_min:
+            r_cost += v[0]
+            r_msgs += int(v[1])
+            r_tokens += int(v[2])
+
     out: dict[str, Any] = {
         "now": now.isoformat(timespec="seconds"),
         "today_date": today.isoformat(),
@@ -566,6 +628,13 @@ def today_summary() -> dict[str, Any]:
         "files_reparsed": files_reparsed,
         "files_tailed": files_tailed,
         "parse_errors": parse_errors_total,
+        "rolling_24h": {
+            "cost": round(r_cost, 4),
+            "messages": r_msgs,
+            "tokens": r_tokens,
+            "since": datetime.fromtimestamp(
+                window_min * 60, tz=now.tzinfo).isoformat(timespec="seconds"),
+        },
         "today": _serialize(today_totals),
         "active": None,
         "last_session_seen": None,
@@ -622,6 +691,12 @@ def _empty_today(started_at: float, files_scanned: int) -> dict[str, Any]:
         "files_reparsed": 0,
         "files_tailed": 0,
         "parse_errors": 0,
+        "rolling_24h": {
+            "cost": 0.0,
+            "messages": 0,
+            "tokens": 0,
+            "since": datetime.now().astimezone().isoformat(timespec="seconds"),
+        },
         "today": _serialize(_zero_bucket()),
         "active": None,
         "last_session_seen": None,
@@ -703,6 +778,103 @@ def _resolve_range(range_key: str | None,
     return at_midnight(today), end, "today"
 
 
+def _range_scan_one_file(path: Path, proj: str,
+                         start_utc: datetime, end_utc: datetime,
+                         include_weekends: bool,
+                         want_hourly: bool) -> dict[str, Any] | None:
+    """Parse one JSONL against a (start, end) window; partial aggregate.
+
+    Returns None when the file can't be opened. Pure function — thread-safe.
+    """
+    totals = _zero_bucket()
+    by_day: dict[str, list] = {}
+    by_model: dict[str, list] = {}
+    p_cost = 0.0
+    p_msgs = 0
+    p_tokens = 0
+    p_models: set[str] = set()
+    hourly = [[0.0, 0, 0] for _ in range(24)] if want_hourly else None
+    sessions: set[str] = set()
+    parse_errors = 0
+
+    try:
+        f = open(path, "r", encoding="utf-8", errors="ignore")  # noqa: SIM115
+    except OSError:
+        return None
+    with f:
+        for raw in f:
+            line = raw.strip()
+            if not line or '"usage"' not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                parse_errors += 1
+                continue
+            dt = _parse_ts(rec.get("timestamp"))
+            if dt is None:
+                continue
+            if dt < start_utc or dt >= end_utc:
+                continue
+            if not include_weekends and dt.astimezone().weekday() >= 5:
+                continue
+            msg = rec.get("message") or {}
+            usage = msg.get("usage")
+            if not usage:
+                continue
+            model = msg.get("model") or ""
+            fields = _extract_usage_fields(usage, model)
+            _add(totals, fields)
+            sid = rec.get("sessionId")
+            if sid:
+                sessions.add(sid)
+
+            local_dt = dt.astimezone()
+            tokens = (fields["input"] + fields["output"]
+                      + fields["cache_5m"] + fields["cache_1h"]
+                      + fields["cache_read"])
+            day = local_dt.date().isoformat()
+            d = by_day.get(day)
+            if d is None:
+                by_day[day] = [fields["cost"], 1, tokens]
+            else:
+                d[0] += fields["cost"]
+                d[1] += 1
+                d[2] += tokens
+
+            if model:
+                m = by_model.get(model)
+                if m is None:
+                    by_model[model] = [fields["cost"], 1, tokens]
+                else:
+                    m[0] += fields["cost"]
+                    m[1] += 1
+                    m[2] += tokens
+
+            p_cost += fields["cost"]
+            p_msgs += 1
+            p_tokens += tokens
+            if model:
+                p_models.add(model)
+
+            if hourly is not None:
+                h = local_dt.hour
+                hourly[h][0] += fields["cost"]   # [cost, tokens, messages]
+                hourly[h][1] += tokens
+                hourly[h][2] += 1
+
+    return {
+        "totals": totals,
+        "by_day": by_day,
+        "by_model": by_model,
+        "project": {"name": proj, "cost": p_cost, "messages": p_msgs,
+                    "tokens": p_tokens, "models": p_models},
+        "hourly": hourly,
+        "sessions": sessions,
+        "parse_errors": parse_errors,
+    }
+
+
 def range_summary(range_key: str = "today",
                   custom_start: str | None = None,
                   custom_end:   str | None = None,
@@ -754,6 +926,10 @@ def range_summary(range_key: str = "today",
     if not CLAUDE_HOME.exists():
         return _empty_range(label, start_utc, end_utc, started_at)
 
+    # Range scans re-read every file, so fan out across the same worker pool
+    # the today scan uses. Workers return partial aggregates; merging is
+    # order-independent (sums/sets).
+    paths: list[tuple[Path, str]] = []
     for path in CLAUDE_HOME.rglob("*.jsonl"):
         files_scanned += 1
         proj = _project_name(path)
@@ -761,80 +937,52 @@ def range_summary(range_key: str = "today",
             continue
         if proj in deny:
             continue
+        paths.append((path, proj))
 
-        try:
-            # open is guarded separately so a vanished file just skips;
-            # the with-block below owns the close.
-            f = open(path, "r", encoding="utf-8", errors="ignore")  # noqa: SIM115
-        except OSError:
-            continue
-        with f:
-            for raw in f:
-                line = raw.strip()
-                if not line or '"usage"' not in line:
-                    continue
+    want_hourly = (end_dt - start_dt) <= timedelta(hours=25)
+
+    def _merge_partial(res: dict[str, Any]) -> None:
+        nonlocal parse_errors
+        _add(totals, res["totals"])
+        parse_errors += res["parse_errors"]
+        if res["sessions"]:
+            sessions_seen.update(res["sessions"])
+        for day, v in res["by_day"].items():
+            b = by_day_acc[day]
+            b["cost"] += v[0]
+            b["messages"] += v[1]
+            b["tokens"] += v[2]
+        for model, v in res["by_model"].items():
+            b = by_model_acc[model]
+            b["cost"] += v[0]
+            b["messages"] += v[1]
+            b["tokens"] += v[2]
+        pv = res["project"]
+        pb: dict[str, Any] = by_project_acc[pv["name"]]
+        pb["cost"] += pv["cost"]
+        pb["messages"] += pv["messages"]
+        pb["tokens"] += pv["tokens"]
+        pb["models"].update(pv["models"])
+        rh = res["hourly"]
+        if rh is not None:
+            for h in range(24):
+                hourly[h]["cost"] += rh[h][0]
+                hourly[h]["tokens"] += rh[h][1]
+                hourly[h]["messages"] += rh[h][2]
+
+    if paths:
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
+            futs = [ex.submit(_range_scan_one_file, p, proj,
+                              start_utc, end_utc, include_weekends,
+                              want_hourly)
+                    for (p, proj) in paths]
+            for fut in futs:
                 try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    parse_errors += 1
-                    continue
-                dt = _parse_ts(rec.get("timestamp"))
-                if dt is None:
-                    continue
-                if dt < start_utc or dt >= end_utc:
-                    continue
-                if not include_weekends and dt.astimezone().weekday() >= 5:
-                    continue
-                msg = rec.get("message") or {}
-                usage = msg.get("usage")
-                if not usage:
-                    continue
-                model = msg.get("model") or ""
-                fields = _extract_usage_fields(usage, model)
-                _add(totals, fields)
-                sid = rec.get("sessionId")
-                if sid:
-                    sessions_seen.add(sid)
-
-                local_dt = dt.astimezone()
-                day = local_dt.date().isoformat()
-                by_day_acc[day]["cost"] += fields["cost"]
-                by_day_acc[day]["messages"] += 1
-                by_day_acc[day]["tokens"] += (
-                    fields["input"] + fields["output"]
-                    + fields["cache_5m"] + fields["cache_1h"]
-                    + fields["cache_read"]
-                )
-
-                if model:
-                    by_model_acc[model]["cost"] += fields["cost"]
-                    by_model_acc[model]["messages"] += 1
-                    by_model_acc[model]["tokens"] += (
-                        fields["input"] + fields["output"]
-                        + fields["cache_5m"] + fields["cache_1h"]
-                        + fields["cache_read"]
-                    )
-
-                by_project_acc[proj]["cost"] += fields["cost"]
-                by_project_acc[proj]["messages"] += 1
-                by_project_acc[proj]["tokens"] += (
-                    fields["input"] + fields["output"]
-                    + fields["cache_5m"] + fields["cache_1h"]
-                    + fields["cache_read"]
-                )
-                if model:
-                    by_project_acc[proj]["models"].add(model)
-
-                # hourly only meaningful for ≤24h ranges
-                if (end_dt - start_dt) <= timedelta(hours=25):
-                    h = local_dt.hour
-                    hourly[h]["cost"] += fields["cost"]
-                    hourly[h]["tokens"] += (
-                        fields["input"] + fields["output"]
-                        + fields["cache_5m"] + fields["cache_1h"]
-                        + fields["cache_read"]
-                    )
-                    hourly[h]["messages"] += 1
+                    res = fut.result()
+                except Exception:
+                    res = None
+                if res:
+                    _merge_partial(res)
 
     # Fill missing days in range for nicer chart line.
     days_list = []

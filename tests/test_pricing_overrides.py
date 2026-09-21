@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -117,6 +117,30 @@ class ScannerTailTest(unittest.TestCase):
             self.assertAlmostEqual(res2["today_totals"]["cost"],
                                    full["today_totals"]["cost"])
             self.assertEqual(off2, p.stat().st_size)
+
+    def test_rolling_window_counts_pre_midnight_usage(self):
+        now = datetime.now(UTC)
+        # Synthetic midnight 1h ago: the 2h-ago record is pre-"midnight" but
+        # still inside the rolling window; the 26h-ago one is outside both.
+        midnight = now - timedelta(hours=1)
+        cutoff = int((now.timestamp() - 25 * 3600) // 60)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "session.jsonl"
+            # 2h ago, 26h ago (outside the window), and now.
+            p.write_text(
+                _usage_record(now - timedelta(hours=2), inp=1_000_000) + "\n"
+                + _usage_record(now - timedelta(hours=26), inp=5_000_000) + "\n"
+                + _usage_record(now, inp=1_000_000) + "\n",
+                encoding="utf-8")
+            res, _off = scanner._scan_one_file(
+                p, midnight, rolling_cutoff_min=cutoff)
+
+        self.assertEqual(res["sess_msgs_today"], 1)   # today only
+        self.assertEqual(len(res["rolling"]), 2)      # 2h-ago + now buckets
+        cost = sum(v[0] for v in res["rolling"].values())
+        self.assertAlmostEqual(cost, 6.0)             # 2 x $3/M sonnet
+        msgs = sum(v[1] for v in res["rolling"].values())
+        self.assertEqual(msgs, 2)
 
     def test_partial_trailing_line_is_held_back(self):
         now = datetime.now(UTC)

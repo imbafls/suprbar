@@ -1,5 +1,20 @@
 # supr.bar CHANGELOG
 
+## v0.15.1 — rolling 24h without range scans, and much faster range scans
+
+- **The mini overlay's 24h number no longer triggers a range scan.** It is now
+  computed from the cached today scan using minute buckets covering the last
+  24 hours (including the pre-midnight tail). Verified exact to the cent
+  against `/api/range?key=24h` on a 3.2k-file corpus. This also fixes a
+  v0.15.0 regression where the overlay could repeatedly kick off slow range
+  scans every poll cycle.
+- **Range scans run in parallel** (same worker pool as the today scan). On a
+  ~3,200-file corpus a cold 24h range scan dropped from ~58s to ~8s.
+- **The periodic tray refresh no longer clears the range/report/provider
+  caches.** It uses a new light invalidation, so range results survive until
+  their (now 60s) TTL and tab switches stay instant instead of re-scanning on
+  every tray tick.
+
 ## v0.15.0 — mini overlay v2, a resizable flyout, and 14 fewer settings
 
 ### Mini overlay v2

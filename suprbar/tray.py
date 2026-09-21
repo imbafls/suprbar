@@ -580,8 +580,9 @@ class TrayApp:
             wait_s = REFRESH_SECONDS if self._last_live else REFRESH_IDLE_SECONDS
             if self._stop.wait(wait_s):
                 return
-            # Bust the server-side cache so the next tooltip reflects fresh data.
-            server.invalidate_today_cache()
+            # Bust the today cache so the next tooltip reflects fresh data.
+            # (Light invalidation: range/report caches stay valid.)
+            server.invalidate_today_only()
             self._update_tooltip()
 
     # ---- run ----

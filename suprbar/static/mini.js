@@ -15,15 +15,12 @@ const $ = (id) => document.getElementById(id);
 let prefs = null;
 let range = localStorage.getItem('suprbar.mini.range') || '24h';
 let todayData = null;
-let rangeData = null;
 let budgetData = null;
-let lastRangeFetch = 0;
 let lastBudgetFetch = 0;
 let timer = null;
 let tickCount = 0;
 let leaveTimer = null;
 
-const RANGE_STALE_MS = 25_000;
 const BUDGET_STALE_MS = 30_000;
 
 function fmtMoney(n) {
@@ -68,12 +65,12 @@ function liveInfo() {
 }
 
 function currentCost() {
-  if (range === '24h') return rangeData?.totals?.cost ?? 0;
+  if (range === '24h') return todayData?.rolling_24h?.cost ?? 0;
   return todayData?.today?.cost ?? 0;
 }
 
 function currentMsgs() {
-  if (range === '24h') return rangeData?.totals?.messages ?? 0;
+  if (range === '24h') return todayData?.rolling_24h?.messages ?? 0;
   return todayData?.today?.messages ?? 0;
 }
 
@@ -140,17 +137,6 @@ async function fetchToday() {
   }
 }
 
-async function fetchRange(force = false) {
-  if (range !== '24h') return;
-  if (!force && Date.now() - lastRangeFetch < RANGE_STALE_MS) return;
-  try {
-    const r = await fetch('/api/range?key=24h', { cache: 'no-store' });
-    if (!r.ok) return;
-    rangeData = await r.json();
-    lastRangeFetch = Date.now();
-  } catch (_) { /* keep last known */ }
-}
-
 async function fetchBudgets() {
   if (Date.now() - lastBudgetFetch < BUDGET_STALE_MS) return;
   try {
@@ -163,7 +149,6 @@ async function fetchBudgets() {
 
 async function tick() {
   await fetchToday();
-  await fetchRange(false);
   if (document.body.classList.contains('expanded')) await fetchBudgets();
   render();
   tickCount += 1;
@@ -181,7 +166,6 @@ function setRange(next) {
   range = next === 'today' ? 'today' : '24h';
   try { localStorage.setItem('suprbar.mini.range', range); } catch (_) { /* ignore */ }
   render();
-  fetchRange(true).then(render);
 }
 
 function expand(on) {
