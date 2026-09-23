@@ -6,6 +6,7 @@ import logging
 import logging.handlers
 import os
 import signal
+import subprocess
 import sys
 import threading
 
@@ -69,6 +70,45 @@ def setup_logging() -> None:
         logging.getLogger("suprbar").warning("file logging disabled: %s", e)
 
 
+def _terminate_stale_instances() -> None:
+    """Kill leftover installed instances from a hung shutdown.
+
+    Called right after the single-instance mutex is acquired: we are the
+    primary instance now, so any other ``suprbar.exe`` is a zombie that
+    survived its own quit (released the mutex, never exited) and can leave an
+    always-on-top window stuck on screen with no way to close it. Developers
+    running two instances on purpose can set SUPRBAR_FORCE=1 to opt out.
+    """
+    if sys.platform != "win32" or os.environ.get("SUPRBAR_FORCE") == "1":
+        return
+    log = logging.getLogger("suprbar")
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq suprbar.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    me = os.getpid()
+    killed: list[int] = []
+    for line in out.stdout.splitlines():
+        cols = [c.strip().strip('"') for c in line.split('","')]
+        if len(cols) < 2 or not cols[1].isdigit():
+            continue
+        pid = int(cols[1])
+        if pid == me:
+            continue
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                           capture_output=True, timeout=5, check=False)
+            killed.append(pid)
+        except (OSError, subprocess.SubprocessError):
+            continue
+    if killed:
+        log.warning("terminated stale instance(s): %s",
+                    ", ".join(str(p) for p in killed))
+
+
 def main() -> int:
     setup_logging()
     log = logging.getLogger("suprbar")
@@ -87,6 +127,9 @@ def main() -> int:
         log.warning("another suprbar instance is already running "
                     "(set SUPRBAR_FORCE=1 to override) — exiting")
         return 0
+    # We hold the mutex: any other installed instance is a hung leftover whose
+    # windows would otherwise sit on screen forever.
+    _terminate_stale_instances()
 
     httpd, port, _ = server.start_in_background(DEFAULT_PORT)
     log.info("http server on 127.0.0.1:%d (pid=%d)", port, os.getpid())

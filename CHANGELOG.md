@@ -1,5 +1,16 @@
 # supr.bar CHANGELOG
 
+## v0.15.6 — no more zombie instances
+
+- **Fixed: a hung shutdown could leave a stale supr.bar process running**,
+  with its always-on-top mini overlay stuck on screen and impossible to close
+  (the hung process had already released the single-instance lock, so new
+  launches coexisted with it — two such leftovers were found running).
+- On startup the app now terminates any stale installed instance right after
+  acquiring the single-instance lock.
+- A 6-second exit watchdog force-quits the process if WebView2 teardown ever
+  hangs, so a zombie can't survive its own shutdown in the first place.
+
 ## v0.15.5 — density is back
 
 - **Restored the Density setting (compact / normal / spacious)** that the

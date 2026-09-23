@@ -639,6 +639,16 @@ class TrayBridge:
         Windows message loop can drain cleanly. The tray's _on_quit signals
         pystray._icon.stop() afterwards.
         """
+        # Watchdog: WebView2 teardown has been observed to hang, which used to
+        # leave a zombie process (and its always-on-top windows) behind. Give
+        # teardown a few seconds, then force the process to exit.
+        def _force_exit():
+            time.sleep(6.0)
+            log.warning("shutdown hung — forcing exit")
+            os._exit(0)
+        threading.Thread(target=_force_exit, daemon=True,
+                         name="suprbar-exit-watchdog").start()
+
         if self._window:
             try:
                 self._window.destroy()

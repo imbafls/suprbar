@@ -10,7 +10,7 @@
 ; from suprbar/__version__ locally and the git tag in CI. The literal below is
 ; only a fallback for a bare `iscc installer.iss` — keep it in sync on release.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.15.5"
+  #define MyAppVersion "0.15.6"
 #endif
 #define MyAppPublisher "Omer Taji"
 #define MyAppURL       "https://github.com/imbafls/suprbar"
