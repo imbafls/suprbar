@@ -7,8 +7,8 @@ short-lived child means the tray process never loads WebView2 at all, and
 the memory is returned to the system whenever the window is gone.
 
 Protocol (one word per line, UTF-8):
-  tray -> child (stdin):  show | hide | toggle | settings | click_through | exit
-  child -> tray (stdout): shown | hidden | quit | apply_mini | open_flyout | disable
+  tray -> child (stdin):  show | hide | toggle | settings | exit
+  child -> tray (stdout): shown | hidden | quit | open_flyout | disable
 EOF on stdin means the tray process is gone, so the child exits too.
 
 Launched as ``suprbar --window flyout|mini --url <base url>``.
@@ -109,7 +109,6 @@ def run(kind: str, url: str) -> int:
             "hide": bridge.hide,
             "toggle": bridge.toggle,
             "settings": bridge.open_with_settings,
-            "click_through": bridge.apply_click_through,
         }
     elif kind == "mini":
         from . import mini
@@ -118,7 +117,6 @@ def run(kind: str, url: str) -> int:
         handlers = {
             "show": mbridge.show,
             "hide": mbridge.hide,
-            "click_through": mbridge.apply_click_through,
         }
     else:
         log.error("unknown window kind %r", kind)

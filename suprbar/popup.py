@@ -7,15 +7,12 @@ Process model:
   FlyoutBridge; FlyoutBridge reports back through its ``notify`` callback.
 
 Window:
-  * 360 x 480 px (matches MVP "Tray · live session" artboard, room for footer)
-  * Frameless, on-top, no taskbar entry
-  * Positioned bottom-right of the work area on the monitor under the cursor
-  * Rounded corners + transient Mica backdrop via DWM API on Windows 11
-  * Auto-hide on focus loss so it behaves like a real tray flyout
+  * Fixed 360 x 480 (logical px), frameless, always on top, no taskbar entry
+  * Always placed at the bottom-right of the monitor under the cursor
+  * Rounded corners via DWM on Windows 11
+  * Hides on focus loss unless pinned, like a real tray flyout
 
-Window position is persisted to %LOCALAPPDATA%\\suprbar\\window-state.json so
-the user's last placement (after dragging or snap-to-corner) is restored on
-next show.
+window-state.json only holds the mini overlay's position now.
 """
 
 from __future__ import annotations
@@ -37,19 +34,14 @@ from . import config
 
 log = logging.getLogger("suprbar.popup")
 
+# Fixed flyout size (logical px) and its margin from the work-area corner.
+# It always opens at the bottom-right of the monitor under the cursor: no
+# drag, no resize, no saved position that could land off-screen.
 WIN_W = 360
 WIN_H = 480
-# Drag-resize bounds (the flyout is frameless; the UI grip drives resize()).
-MIN_W, MIN_H = 260, 320
-MAX_W, MAX_H = 800, 1200
-MARGIN_RIGHT = 12
-MARGIN_BOTTOM = 12
-SNAP_THRESHOLD = 24  # px from a work-area corner that triggers snap
+MARGIN = 12
 
 
-def _clamp_size(w: int, h: int) -> tuple[int, int]:
-    return (max(MIN_W, min(int(w), MAX_W)),
-            max(MIN_H, min(int(h), MAX_H)))
 
 
 # ---------- Window-state persistence (small JSON helper) ----------
@@ -192,47 +184,10 @@ def _work_area() -> tuple[int, int, int, int]:
     return _work_area_for_point(cx, cy)
 
 
-def _bottom_right_xy() -> tuple[int, int]:
-    """Default popup position: bottom-right of the monitor under the cursor."""
-    _l, _t, r, b = _work_area()
-    return (r - WIN_W - MARGIN_RIGHT, b - WIN_H - MARGIN_BOTTOM)
 
 
-def _clamp_to_work_area(x: int, y: int,
-                        wa: tuple[int, int, int, int] | None = None
-                        ) -> tuple[int, int]:
-    """Clamp a window's (x, y) so it stays fully inside the given work area."""
-    l, t, r, b = wa if wa is not None else _work_area()
-    # Allow at least 8px margin on all sides so the user can grab the edge.
-    max_x = r - WIN_W - 1
-    max_y = b - WIN_H - 1
-    min_x = l
-    min_y = t
-    max_x = max(max_x, min_x)
-    max_y = max(max_y, min_y)
-    return (max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
 
 
-def _snap_to_corner(x: int, y: int) -> tuple[int, int]:
-    """If (x, y) is within SNAP_THRESHOLD of any work-area corner of the
-    monitor containing the *window* (not the cursor), snap to it. Otherwise
-    return (x, y) unchanged."""
-    # Use the center of the window to pick the relevant monitor.
-    cx, cy = x + WIN_W // 2, y + WIN_H // 2
-    l, t, r, b = _work_area_for_point(cx, cy)
-    # Candidate corners (top-left coordinates of the window when snapped):
-    tl = (l + MARGIN_RIGHT, t + MARGIN_BOTTOM)
-    tr = (r - WIN_W - MARGIN_RIGHT, t + MARGIN_BOTTOM)
-    bl = (l + MARGIN_RIGHT, b - WIN_H - MARGIN_BOTTOM)
-    br = (r - WIN_W - MARGIN_RIGHT, b - WIN_H - MARGIN_BOTTOM)
-    best = None
-    best_d = SNAP_THRESHOLD
-    for corner in (tl, tr, bl, br):
-        d = max(abs(x - corner[0]), abs(y - corner[1]))
-        if d <= best_d:
-            best = corner
-            best_d = d
-    return best if best is not None else (x, y)
 
 
 def _hwnd_by_title(title: str) -> int:
@@ -262,25 +217,6 @@ def _apply_dwm_round(hwnd: int) -> None:
         pass
 
 
-def _apply_mica_backdrop(hwnd: int) -> None:
-    """Win11 22H2+: ask DWM for a Mica/transient backdrop. Silent on failure."""
-    if sys.platform != "win32" or not hwnd:
-        return
-    try:
-        DwmSetWindowAttribute = ctypes.windll.dwmapi.DwmSetWindowAttribute
-        DwmSetWindowAttribute.argtypes = [
-            wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
-        ]
-        DwmSetWindowAttribute.restype = ctypes.c_long
-        DWMWA_SYSTEMBACKDROP_TYPE = 38
-        DWMSBT_TRANSIENTWINDOW = 4  # acrylic-like transient
-        v = ctypes.c_int(DWMSBT_TRANSIENTWINDOW)
-        DwmSetWindowAttribute(
-            hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
-            ctypes.byref(v), ctypes.sizeof(v),
-        )
-    except (OSError, AttributeError):
-        pass
 
 
 def _hide_from_taskbar(hwnd: int) -> None:
@@ -304,35 +240,6 @@ def _hide_from_taskbar(hwnd: int) -> None:
         pass
 
 
-def set_click_through(hwnd: int, enabled: bool) -> None:
-    """Toggle mouse-input transparency for a window (flyout or mini).
-
-    Uses WS_EX_TRANSPARENT; paired with WS_EX_LAYERED because that is what
-    makes hit-testing pass through to the windows underneath. A layered
-    window also needs an explicit alpha or it can render invisibly, so we
-    set it fully opaque. No-ops off Windows / with no HWND.
-    """
-    if sys.platform != "win32" or not hwnd:
-        return
-    try:
-        GWL_EXSTYLE = -20
-        WS_EX_LAYERED = 0x00080000
-        WS_EX_TRANSPARENT = 0x00000020
-        LWA_ALPHA = 0x00000002
-        user32 = ctypes.windll.user32
-        get_long = user32.GetWindowLongPtrW
-        set_long = user32.SetWindowLongPtrW
-        get_long.restype = ctypes.c_ssize_t
-        set_long.restype = ctypes.c_ssize_t
-        ex = get_long(hwnd, GWL_EXSTYLE)
-        if enabled:
-            set_long(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT)
-            user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
-        else:
-            set_long(hwnd, GWL_EXSTYLE,
-                     ex & ~WS_EX_TRANSPARENT & ~WS_EX_LAYERED)
-    except OSError as e:
-        log.debug("click-through toggle failed: %s", e)
 
 
 def _dpi_scale(hwnd: int) -> float:
@@ -409,13 +316,63 @@ def _show_webview2_install_dialog() -> None:
         pass
 
 
+# ---------- Placement ----------
+
+def _monitor_dpi_scale(px: int, py: int) -> float:
+    """DPI scale of the monitor containing (px, py); 1.0 when unknown."""
+    if sys.platform != "win32":
+        return 1.0
+    try:
+        user32 = ctypes.windll.user32
+        MonitorFromPoint = user32.MonitorFromPoint
+        MonitorFromPoint.argtypes = [_POINT, wintypes.DWORD]
+        MonitorFromPoint.restype = wintypes.HMONITOR
+        hmon = MonitorFromPoint(_POINT(px, py), 2)  # MONITOR_DEFAULTTONEAREST
+        dx, dy = wintypes.UINT(), wintypes.UINT()
+        # MDT_EFFECTIVE_DPI = 0
+        if ctypes.windll.shcore.GetDpiForMonitor(
+                hmon, 0, ctypes.byref(dx), ctypes.byref(dy)) == 0 and dx.value:
+            return dx.value / 96.0
+    except (OSError, AttributeError) as e:
+        log.debug("monitor dpi lookup failed: %s", e)
+    return 1.0
+
+
+def flyout_rect() -> tuple[int, int, int, int]:
+    """Physical-pixel (x, y, w, h) for the flyout on the cursor's monitor.
+
+    The work area is in physical pixels, so the logical size and margin are
+    scaled by that monitor's DPI before subtracting — mixing the two put the
+    flyout partly off-screen on scaled displays.
+    """
+    cx, cy = _cursor_pos()
+    left, top, right, bottom = _work_area_for_point(cx, cy)
+    s = _monitor_dpi_scale(cx, cy)
+    w, h, m = int(WIN_W * s), int(WIN_H * s), int(MARGIN * s)
+    x = max(left, right - w - m)
+    y = max(top, bottom - h - m)
+    return x, y, w, h
+
+
+def _place(hwnd: int) -> None:
+    """Move + size the (hidden or shown) flyout without activating it."""
+    if sys.platform != "win32" or not hwnd:
+        return
+    x, y, w, h = flyout_rect()
+    try:
+        ctypes.windll.user32.SetWindowPos(hwnd, None, x, y, w, h,
+                                          _SWP_NOZORDER_NOACTIVATE)
+    except OSError as e:
+        log.debug("flyout placement failed: %s", e)
+
+
 # ---------- Flyout window bridge (runs in the flyout child process) ----------
 
 class FlyoutBridge:
     """Owns the flyout window inside its child process (see windowhost.py).
 
     ``notify`` sends an event line to the tray process: "shown" / "hidden"
-    (so it can retire an idle flyout), "quit" (Alt+Q) and "apply_mini".
+    (so it can retire an idle flyout) and "quit" (Alt+Q).
     """
 
     def __init__(self, notify: Callable[[str], None]):
@@ -424,138 +381,71 @@ class FlyoutBridge:
         self._hwnd: int = 0
         self._visible = False
         self._lock = threading.Lock()
-        self._window_title = "supr.bar"
         self._last_hide_ts: float = 0.0
-        # Suppress JS blur->hide for a brief moment right after show, otherwise
-        # the window can hide on the focus-settle flicker.
+        # Ignore a blur right after show: focus is still settling and the
+        # window would otherwise hide itself immediately.
         self._show_settle_ts: float = 0.0
         self._settle_seconds = 0.4
         self._toggle_grace_seconds = 0.35
-        # Settings-open hint passed via URL hash. The frontend reads
-        # location.hash on load to decide whether to jump to settings.
+        # Settings-open hint; the page reads it via consume_pending_open().
         self._open_settings_next_show = False
-        # One-shot: enforce the exact window size on first show (WinForms
-        # autoscale shrinks the created window slightly).
-        self._size_applied = False
-        # Debounce window-position writes during drag (was syncing JSON every
-        # moved event — that stuttered badly on Win11 WebView2).
-        self._pending_pos: tuple[int, int] | None = None
-        self._pending_size: tuple[int, int] | None = None
-        self._move_save_timer: threading.Timer | None = None
-        self._move_save_delay = 0.35
 
     def attach_window(self, w: webview.Window) -> None:
         self._window = w
 
-    def cache_hwnd(self, hwnd: int) -> None:
-        """Called from the `loaded` event so we stop polling FindWindowW."""
-        if hwnd:
-            self._hwnd = hwnd
-
     def _resolve_hwnd(self) -> int:
-        if self._hwnd:
-            return self._hwnd
-        # Try a few times — the window takes a beat to register its title.
-        for _ in range(20):
-            h = _hwnd_by_title(self._window_title)
-            if h:
-                self._hwnd = h
-                return h
-            time.sleep(0.05)
-        return 0
+        if not self._hwnd:
+            for _ in range(20):
+                self._hwnd = _hwnd_by_title("supr.bar")
+                if self._hwnd:
+                    break
+                time.sleep(0.05)
+        return self._hwnd
 
-    def _decorate(self) -> None:
+    def decorate(self) -> None:
         hwnd = self._resolve_hwnd()
         _apply_dwm_round(hwnd)
-        # Mica/backdrop blur during HWND drag makes WebView2 repaint lag badly;
-        # rounded corners only.
         _hide_from_taskbar(hwnd)
-        self.apply_click_through()
-
-    def apply_click_through(self) -> None:
-        """Sync the flyout's mouse-input transparency to behavior.click_through."""
-        try:
-            on = bool(config.get_pref("behavior.click_through", False))
-        except Exception:
-            on = False
-        set_click_through(self._resolve_hwnd(), on)
-
-    def _resolve_show_xy(self) -> tuple[int, int]:
-        """Pick (x, y) for show(): saved position clamped to current monitor
-        if available; otherwise the bottom-right of the cursor's monitor."""
-        state = load_window_state()
-        if isinstance(state.get("x"), (int, float)) and \
-                isinstance(state.get("y"), (int, float)):
-            x, y = int(state["x"]), int(state["y"])
-            # Clamp to the monitor that currently contains the window center.
-            cx, cy = x + WIN_W // 2, y + WIN_H // 2
-            wa = _work_area_for_point(cx, cy)
-            return _clamp_to_work_area(x, y, wa)
-        return _bottom_right_xy()
 
     def open_with_settings(self) -> None:
-        """Show the popup and tell the frontend to open the settings view.
-
-        We use the URL hash so this works regardless of whether the frontend
-        is already loaded (a load_url with #settings will trigger hashchange).
-        """
+        """Show the flyout with the settings sheet open."""
         self._open_settings_next_show = True
-        if not self._window:
-            return
-        try:
-            cur = self._window.get_current_url() or ""
-        except Exception:
-            cur = ""
-        try:
-            if cur:
-                base = cur.split("#", 1)[0]
-                self._window.load_url(base + "#settings")
-            else:
-                # No URL yet — frontend will read pending hash via JsApi.
-                pass
-        except Exception as e:
-            log.debug("load_url for settings failed: %s", e)
+        w = self._window
+        if w is not None:
+            def _push():
+                try:
+                    w.evaluate_js("window.__suprbarOpenSettings"
+                                  " && window.__suprbarOpenSettings()")
+                except Exception as e:
+                    log.debug("open settings push failed: %s", e)
+            threading.Thread(target=_push, daemon=True,
+                             name="suprbar-flyout-settings").start()
         self.show()
 
     def show(self) -> None:
-        if not self._window:
+        if self._window is None:
             return
         with self._lock:
-            x, y = self._resolve_show_xy()
-            try:
-                self._window.move(x, y)
-            except Exception as e:
-                log.debug("move failed: %s", e)
+            _place(self._resolve_hwnd())
             try:
                 self._window.show()
             except Exception as e:
                 log.debug("show failed: %s", e)
-            self._decorate()
-            # WinForms autoscale can shave a few px off the requested size;
-            # enforce the exact size once on the first show (safe here — the
-            # window is already visible, and this never force-shows).
-            if not self._size_applied:
-                set_window_size(self._resolve_hwnd(), WIN_W, WIN_H)
-                self._size_applied = True
+            self.decorate()
+            # Re-assert the rect: WinForms may rescale the form on first show.
+            _place(self._resolve_hwnd())
             self._visible = True
             self._show_settle_ts = time.monotonic()
-            save_window_state({"last_visible": time.time()})
         self._set_page_visible(True)
         self._notify("shown")
 
     def hide(self, from_blur: bool = False) -> None:
-        if not self._window:
+        if self._window is None:
             return
         with self._lock:
             if from_blur:
-                # Don't auto-hide if user has pinned the popup.
                 if config.is_pinned():
                     return
-                # User can also disable auto-hide-on-blur entirely.
-                if not config.auto_hide_enabled():
-                    return
-                # Ignore blur-driven hide if the window just opened — the
-                # focus is still settling.
                 if time.monotonic() - self._show_settle_ts < self._settle_seconds:
                     return
             was_visible = self._visible
@@ -589,10 +479,8 @@ class FlyoutBridge:
                          name="suprbar-flyout-vis").start()
 
     def toggle(self) -> None:
-        # If the user clicks the tray icon while the popup is visible, JS
-        # blur fires first and hides the window. By the time toggle() runs,
-        # _visible is False, so we'd re-show. Detect that race via the
-        # recent hide timestamp and treat as toggle-off.
+        # A tray click on a visible flyout first blurs it (hiding it), then
+        # toggles: treat a hide in the last moment as the toggle-off.
         if self._visible:
             self.hide()
             return
@@ -600,79 +488,12 @@ class FlyoutBridge:
             return
         self.show()
 
-    def is_visible(self) -> bool:
-        return self._visible
-
     def quit(self) -> None:
         """Alt+Q: ask the tray process to shut the whole app down."""
         self._notify("quit")
 
-    # ---- callbacks invoked from webview event handlers ----
 
-    def on_moved(self, x: int, y: int) -> None:
-        """Remember position while dragging; persist after motion settles."""
-        try:
-            self._pending_pos = (int(x), int(y))
-            self._schedule_pos_save()
-        except Exception as e:
-            log.debug("on_moved failed: %s", e)
-
-    def _schedule_pos_save(self) -> None:
-        if self._move_save_timer is not None:
-            try:
-                self._move_save_timer.cancel()
-            except Exception:
-                pass
-        t = threading.Timer(self._move_save_delay, self._flush_pos_save)
-        t.daemon = True
-        self._move_save_timer = t
-        t.start()
-
-    def _flush_pos_save(self) -> None:
-        pos, size = self._pending_pos, self._pending_size
-        self._pending_pos = None
-        self._pending_size = None
-        if pos is None and size is None:
-            return
-        patch: dict = {}
-        try:
-            if pos is not None:
-                sx, sy = _snap_to_corner(pos[0], pos[1])
-                patch.update({"x": sx, "y": sy})
-            if size is not None:
-                patch.update({"w": size[0], "h": size[1]})
-            if patch:
-                save_window_state(patch)
-        except Exception as e:
-            log.debug("pos/size save failed: %s", e)
-
-    def resize(self, width: int, height: int) -> None:
-        """Resize the flyout (the UI's drag grip calls this).
-
-        Uses our own SetWindowPos, not Window.resize() — pywebview's version
-        passes SWP_SHOWWINDOW and would un-hide a hidden flyout.
-        """
-        global WIN_W, WIN_H
-        if not self._window:
-            return
-        w, h = _clamp_size(width, height)
-        if (w, h) == (WIN_W, WIN_H):
-            return
-        WIN_W, WIN_H = w, h
-        set_window_size(self._resolve_hwnd(), w, h)
-
-    def on_resized(self, width: int, height: int) -> None:
-        """Remember the size after a resize completes (debounced)."""
-        global WIN_W, WIN_H
-        try:
-            WIN_W, WIN_H = _clamp_size(int(width), int(height))
-        except (TypeError, ValueError):
-            return
-        self._pending_size = (WIN_W, WIN_H)
-        self._schedule_pos_save()
-
-
-# ---------- JS bridge exposed to the popup ----------
+# ---------- JS bridge exposed to the flyout page ----------
 
 class JsApi:
     """Functions callable from JS as `window.pywebview.api.<name>()`."""
@@ -681,38 +502,14 @@ class JsApi:
         self._bridge = bridge
 
     def hide(self):
-        # JS-driven hide (Esc key, blur). Treat as blur-style so pin matters.
+        # Esc / focus loss: treated as a blur so Pin is honoured.
         self._bridge.hide(from_blur=True)
 
     def quit(self):
-        # Alt+Q. Trigger full app shutdown via the bridge.
         self._bridge.quit()
 
-    def open_settings(self):
-        """Programmatically open the settings view in the popup."""
-        self._bridge.open_with_settings()
-
-    def apply_click_through(self):
-        """Re-read behavior.click_through and apply it to the flyout HWND."""
-        self._bridge.apply_click_through()
-
-    def apply_mini(self):
-        """Re-read mini prefs and sync the overlay + its click-through state.
-
-        Called by the settings UI after committing mini.* / unaffected prefs.
-        """
-        # The overlay is its own process, owned by the tray process.
-        self._bridge._notify("apply_mini")
-
-    def resize_window(self, width, height):
-        """Flyout resize grip → native resize (bridge clamps to bounds)."""
-        try:
-            self._bridge.resize(int(width), int(height))
-        except (TypeError, ValueError):
-            pass
-
     def consume_pending_open(self) -> str:
-        """Frontend may poll this on load to discover a queued navigation."""
+        """The page asks once on load whether to open settings first."""
         if self._bridge._open_settings_next_show:
             self._bridge._open_settings_next_show = False
             return "settings"
@@ -722,66 +519,25 @@ class JsApi:
 # ---------- Window creation ----------
 
 def build_window(url: str, bridge: FlyoutBridge) -> webview.Window:
-    global WIN_W, WIN_H
-    # Size comes from the last drag-resize (window-state.json), falling back
-    # to the design target. Placement as before.
-    try:
-        from . import config as _cfg
-        on_top = bool(_cfg.always_on_top())
-    except Exception:
-        on_top = True
-    state = load_window_state()
-    try:
-        WIN_W, WIN_H = _clamp_size(
-            int(state.get("w") or WIN_W), int(state.get("h") or WIN_H))
-    except (TypeError, ValueError):
-        pass
-    x, y = bridge._resolve_show_xy()
+    x, y, _w, _h = flyout_rect()
     w = webview.create_window(
         title="supr.bar",
         url=url,
         width=WIN_W,
         height=WIN_H,
-        min_size=(MIN_W, MIN_H),
         x=x,
         y=y,
         frameless=True,
-        # Whole-window drag via WebView2; interactive controls opt out in CSS
-        # (-webkit-app-region: no-drag). Without this, only .flyout-head drags
-        # and often does not move the HWND at all on Win11.
-        easy_drag=True,
+        easy_drag=False,
         resizable=False,
-        on_top=on_top,
+        on_top=True,
         hidden=True,
         background_color="#0d1018",
-        minimized=False,
         js_api=JsApi(bridge),
     )
     # pywebview's stubs type create_window() as Optional; it always returns a
-    # Window in practice — assert once so the narrowing below type-checks.
+    # Window in practice.
     assert w is not None
     bridge.attach_window(w)
-
-    def on_loaded():
-        # Cache hwnd once instead of polling FindWindowW on every show().
-        h = _hwnd_by_title("supr.bar")
-        if h:
-            bridge.cache_hwnd(h)
-        bridge._decorate()
-    w.events.loaded += on_loaded
-
-    def on_moved(x_new, y_new):
-        bridge.on_moved(x_new, y_new)
-    try:
-        w.events.moved += on_moved
-    except (AttributeError, TypeError) as e:
-        log.debug("moved event unavailable: %s", e)
-
-    def on_resized(w_new, h_new):
-        bridge.on_resized(w_new, h_new)
-    try:
-        w.events.resized += on_resized
-    except (AttributeError, TypeError) as e:
-        log.debug("resized event unavailable: %s", e)
-
+    w.events.loaded += bridge.decorate
     return w

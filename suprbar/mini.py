@@ -2,7 +2,7 @@
 
 A second frameless WebView2 window (~176x44) showing the live pip, today's
 cost, and the current burn rate. Click opens the full flyout; the tray menu
-(or Settings) can hide it or make it click-through.
+(or Settings) can hide it.
 
 Runs in its own child process (windowhost.py) that exists only while the
 overlay is enabled; the tray process starts it, and stops it on disable.
@@ -19,7 +19,6 @@ from collections.abc import Callable
 
 import webview
 
-from . import config
 from .popup import (
     _apply_dwm_round,
     _hide_from_taskbar,
@@ -28,7 +27,6 @@ from .popup import (
     _work_area_for_point,
     load_window_state,
     save_window_state,
-    set_click_through,
     set_window_pos_size,
     set_window_size,
 )
@@ -115,7 +113,6 @@ class MiniBridge:
         hwnd = self._resolve_hwnd()
         _apply_dwm_round(hwnd)
         _hide_from_taskbar(hwnd)
-        self.apply_click_through()
 
     # ---- position ----
 
@@ -240,13 +237,6 @@ class MiniBridge:
             self._expanded = False
             set_window_size(self._resolve_hwnd(), MINI_W, MINI_H)
 
-    def apply_click_through(self) -> None:
-        """Sync overlay mouse-input transparency to mini.click_through."""
-        try:
-            on = config.mini_click_through()
-        except Exception:
-            on = False
-        set_click_through(self._resolve_hwnd(), on)
 
     def open_flyout(self) -> None:
         self._notify("open_flyout")

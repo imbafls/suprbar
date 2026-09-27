@@ -158,8 +158,6 @@ class MiniController:
     def is_visible(self) -> bool:
         return self._child.alive()
 
-    def apply_click_through(self) -> None:
-        self._child.send("click_through")
 
     def sync(self) -> None:
         """Match the overlay to the persisted mini.* prefs."""
@@ -171,8 +169,6 @@ class MiniController:
             self.show()
         elif not enabled and self.is_visible():
             self.hide()
-        if self.is_visible():
-            self.apply_click_through()
 
     def stop(self, wait: bool = False) -> None:
         self._child.stop(wait=wait)
@@ -213,9 +209,6 @@ class FlyoutController:
         self._child.ensure()
         self._child.send("settings")
 
-    def apply_click_through(self) -> None:
-        self._child.send("click_through")
-
     def quit(self) -> None:
         self._cancel_idle_exit()
         self._child.stop(wait=True)
@@ -231,8 +224,6 @@ class FlyoutController:
         elif event == "quit":
             threading.Thread(target=self._on_quit, daemon=True,
                              name="suprbar-quit").start()
-        elif event == "apply_mini":
-            self.mini.sync()
 
     def _schedule_idle_exit(self) -> None:
         with self._timer_lock:

@@ -332,7 +332,7 @@ class TrayApp:
         except Exception:
             log.exception("middle-click toggle failed")
 
-    # ---- mini overlay / click-through menu callbacks ----
+    # ---- mini overlay menu callbacks ----
 
     def _on_mini_toggle(self, icon, item):
         try:
@@ -356,39 +356,9 @@ class TrayApp:
         except Exception:
             return False
 
-    def _on_mini_click_through(self, icon, item):
-        try:
-            config.set_pref("mini.click_through",
-                            not config.mini_click_through())
-            mini = self.bridge.mini
-            if mini:
-                mini.apply_click_through()
-            if self._icon:
-                self._icon.update_menu()
-        except Exception:
-            log.exception("mini click-through toggle failed")
 
-    def _is_mini_click_through(self, item) -> bool:
-        try:
-            return config.mini_click_through()
-        except Exception:
-            return False
 
-    def _on_flyout_click_through(self, icon, item):
-        try:
-            new = not bool(config.get_pref("behavior.click_through", False))
-            config.set_pref("behavior.click_through", new)
-            self.bridge.apply_click_through()
-            if self._icon:
-                self._icon.update_menu()
-        except Exception:
-            log.exception("flyout click-through toggle failed")
 
-    def _is_flyout_click_through(self, item) -> bool:
-        try:
-            return bool(config.get_pref("behavior.click_through", False))
-        except Exception:
-            return False
 
     # ---- icon / tooltip updates ----
 
@@ -490,11 +460,6 @@ class TrayApp:
                              checked=self._is_pinned),
             pystray.MenuItem("Mini overlay", self._on_mini_toggle,
                              checked=self._is_mini_enabled),
-            pystray.MenuItem("Mini click-through", self._on_mini_click_through,
-                             checked=self._is_mini_click_through,
-                             visible=lambda item: self._is_mini_enabled(item)),
-            pystray.MenuItem("Click-through flyout", self._on_flyout_click_through,
-                             checked=self._is_flyout_click_through),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Settings…", self._on_settings),
             pystray.MenuItem("About supr.bar", self._on_about),
