@@ -10,7 +10,7 @@ One item per loop iteration, in order; tick only with evidence.
   instance via WM_NOTIFY posts (dbl-click opens/closes, middle-click pins).
 
 ## 1. Spec
-- [ ] Write `docs/superpowers/specs/2026-09-27-suprbar-v2-design.md` and self-review it
+- [x] Write `docs/superpowers/specs/2026-09-27-suprbar-v2-design.md` and self-review it — spec covers screen, 5 settings + consumers, tray, 16 routes kept / 11 removed, v4→v5 migration, errors, tests, verification; placeholder scan clean
 
 ## 2. Plan
 - [ ] Write `docs/superpowers/plans/2026-09-27-suprbar-v2.md` (ordered small tasks + verification) and append its tasks to section 3 below
