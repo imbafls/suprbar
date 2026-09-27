@@ -162,6 +162,12 @@ def main() -> int:
             pass
 
     server.set_quit_callback(shutdown_app)
+
+    def on_settings_changed(applied: dict) -> None:
+        # The overlay is a tray-owned process: start/stop it right away.
+        if "mini.enabled" in applied:
+            bridge.mini.sync()
+    server.set_settings_callback(on_settings_changed)
     updater.set_quit_fn(shutdown_app)
     # Best-effort: clear leftover installer temp dirs from a prior update.
     threading.Thread(target=updater.cleanup_stale_downloads, daemon=True,

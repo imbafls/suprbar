@@ -247,21 +247,6 @@ def save(cfg: dict[str, Any]) -> None:
         _cache_sig = _file_sig(p)
 
 
-def reset(reset_key: bool = False) -> dict[str, Any]:
-    """Reset config to defaults. If reset_key=False, preserve the admin key."""
-    existing_key = None
-    if not reset_key:
-        try:
-            cur = load()
-            existing_key = cur.get("sources", {}).get("anthropic_api", {}).get("admin_key_enc", "")
-        except Exception:
-            existing_key = None
-
-    fresh = json.loads(json.dumps(DEFAULTS))
-    if not reset_key and existing_key:
-        fresh.setdefault("sources", {}).setdefault("anthropic_api", {})["admin_key_enc"] = existing_key
-    save(fresh)
-    return fresh
 
 
 # ---------- generic dotted-path access ----------
@@ -381,14 +366,8 @@ def set_admin_key(plaintext: str | None) -> bool:
     return True
 
 
-def set_anthropic_enabled(enabled: bool) -> None:
-    cfg = load()
-    cfg.setdefault("sources", {}).setdefault("anthropic_api", {})["enabled"] = bool(enabled)
-    save(cfg)
 
 
-def has_admin_key() -> bool:
-    return get_admin_key() is not None
 
 
 def get_source_key(source: str) -> str | None:
@@ -443,14 +422,6 @@ def set_pinned(v: bool) -> None:
     save(cfg)
 
 
-def start_on_login() -> bool:
-    return bool(get_pref("ui.start_on_login", False))
-
-
-def set_start_on_login(v: bool) -> None:
-    cfg = load()
-    cfg.setdefault("ui", {})["start_on_login"] = bool(v)
-    save(cfg)
 
 
 # ---------- Mini overlay ----------

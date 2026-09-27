@@ -124,39 +124,6 @@ def _range_fixture() -> dict:
     }
 
 
-def _prefs_fixture() -> dict:
-    return {"prefs": {
-        "schema_version": 4,
-        "range": {"default": "today", "week_starts_on": "mon"},
-        "display": {"theme": "dark", "accent": "blue", "density": "compact",
-                    "font_scale": 1.0, "cost_format": "with_cents",
-                    "animations": True},
-        "budgets": {"daily_limit": 25.0, "weekly_limit": 0.0,
-                    "monthly_limit": 750.0, "alert_at_pct": 80,
-                    "notify": True, "tray_warn_color": True,
-                    "project_limits": ["discord=50"]},
-        "behavior": {"refresh_seconds": 5, "auto_hide": True,
-                     "always_on_top": True, "live_threshold_seconds": 60,
-                     "confirm_quit": False, "click_through": False},
-        "mini": {"enabled": False, "show_burn": True, "click_through": False},
-        "pricing": {"remote_url": ""},
-        "projects": {"allowlist": [], "denylist": [], "anonymize": False,
-                     "top_n": 10},
-        "data": {"log_level": "INFO"},
-        "ui": {"pinned": False, "start_on_login": False},
-        "updates": {"check_on_launch": True, "last_check": "",
-                    "skip_version": ""},
-        "sources": {
-            "local": {"enabled": True},
-            "anthropic_api": {"enabled": False},
-            "hermes": {"enabled": True},
-            "opencode": {"enabled": True},
-            "openrouter": {"enabled": False},
-            "openai": {"enabled": False},
-        },
-    }, "schema_version": 4}
-
-
 class UiSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -164,8 +131,6 @@ class UiSmokeTest(unittest.TestCase):
             mock.patch.object(server, "today_cached", side_effect=_fixture),
             mock.patch.object(server, "range_cached",
                               side_effect=lambda *a, **k: _range_fixture()),
-            mock.patch.object(server, "_prefs_payload",
-                              side_effect=_prefs_fixture),
         ]
         for p in cls._patches:
             p.start()
@@ -225,13 +190,6 @@ class UiSmokeTest(unittest.TestCase):
                 self.assertIn("2", page.text_content("#liveCount"))
                 # Frameless resize grip is present + clickable.
                 self.assertTrue(page.is_visible("#resizeGrip"))
-                # The schema-driven settings render the new sections too.
-                page.click("#settingsBtn")
-                self._wait_text(page, "#settingsSections", "Show mini overlay")
-                # Only the v5 settings exist (the page is rewritten in T8).
-                settings_text = page.text_content("#settingsSections")
-                self.assertNotIn("Per-project daily caps", settings_text)
-                self.assertNotIn("Density", settings_text)
                 self.assertEqual(errors, [])
             finally:
                 browser.close()

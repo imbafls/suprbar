@@ -1,24 +1,15 @@
 """Local HTTP server for the supr.bar flyout.
 
 Routes:
-  GET  /                            static index.html
-  GET  /app.js, /styles.css         static
-  GET  /api/ping                    liveness (used for single-instance check)
+  GET  /, /app.js, /styles.css, /mini.html, /mini.js, /mini.css   pages
+  GET  /api/ping                    liveness
   GET  /api/today[?refresh=1]       aggregated today summary (all sources)
-  GET  /api/range?key=…             usage for a time-range tab
-  GET  /api/config                  current config (key fingerprint only)
-  POST /api/config                  update config (JSON body)
-  POST /api/config/test-key         test admin key (JSON body: {"key": "..."})
-  GET  /api/config/export           full public config snapshot
-  POST /api/config/import           replace config (rejects plaintext keys)
-  POST /api/config/reset            reset to defaults
-  GET  /api/prefs, /api/prefs/schema  full preference tree + schema
-  POST /api/prefs                   update preferences (dotted paths)
-  POST /api/open-path               open a path under ~ in OS default app
+  GET  /api/range?key=…[&refresh=1] usage for a range tab (7d / 30d / 90d)
+  GET  /api/settings                the five settings + key fingerprints
+  POST /api/settings                {"settings": {path: value}, "keys": {source: key}}
+  POST /api/settings/test-key       {"source": …, "key": …} → {ok, message}
   POST /api/quit                    request app shutdown
   GET  /api/version                 app version + build date
-  GET  /api/health                  liveness + last scan + uptime
-  GET  /api/diagnostics             python/platform/cache/log/source health
   GET  /report[.html]               30-day usage report page (relaxed CSP)
   GET  /api/report                  30-day report payload (JSON)
   POST /api/open-report             open the report in the default browser
@@ -34,7 +25,6 @@ import hashlib
 import json
 import logging
 import os
-import platform
 import socket
 import subprocess
 import sys
@@ -47,10 +37,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, aggregator, config, report, scanner, updater
 from .providers import anthropic_api as p_anthropic_api
-from .providers import hermes_local as p_hermes_local
-from .providers import local as p_local
 from .providers import openai as p_openai
-from .providers import opencode as p_opencode
 from .providers import openrouter as p_openrouter
 from datetime import UTC
 
@@ -58,16 +45,6 @@ log = logging.getLogger("suprbar.server")
 
 STATIC_DIR = Path(__file__).parent / "static"
 GZIP_MIN_BYTES = 1024
-_ALLOWED_KEYS: set[str] = {
-    "anthropic_api_key",
-    "anthropic_api_enabled",
-    "openrouter_api_key",
-    "openrouter_api_enabled",
-    "openai_api_key",
-    "openai_api_enabled",
-    "pinned",
-    "start_on_login",
-}
 
 # /api/today is cached briefly server-side. Provider-level caches still apply.
 _today_cache: dict = {"data": None, "ts": 0.0}
@@ -87,8 +64,6 @@ _range_cache: dict[str, dict] = {}
 _RANGE_TTL = 60.0
 
 # Process-level state for diagnostics/health.
-_PROCESS_STARTED = time.monotonic()
-_PROCESS_STARTED_WALL = time.time()
 _HTTP_PORT: int | None = None
 _LAST_SCAN: dict = {"ts": 0.0, "ok": False, "elapsed_ms": 0}
 
@@ -386,12 +361,6 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/version":
             return self._send_json(200, _version_payload())
 
-        if path == "/api/health":
-            return self._send_json(200, _health_payload())
-
-        if path == "/api/diagnostics":
-            return self._send_json(200, _diagnostics_payload())
-
         if path == "/api/update/status":
             return self._send_json(200, _update_status_payload())
 
@@ -412,24 +381,14 @@ class Handler(BaseHTTPRequestHandler):
                 extra_headers={"ETag": etag},
             )
 
-        if path == "/api/config":
-            return self._send_json(200, _public_config())
-
-        if path == "/api/config/export":
-            return self._send_json(200, _export_config())
+        if path == "/api/settings":
+            return self._send_json(200, _settings_payload())
 
         if path == "/api/range":
             try:
                 return self._send_json(200, _range_payload(qs))
             except Exception as e:
                 return self._send_error(500, "range_failed", str(e))
-
-        if path == "/api/prefs":
-            # Return the full mutable preference tree (excluding secrets).
-            return self._send_json(200, _prefs_payload())
-
-        if path == "/api/prefs/schema":
-            return self._send_json(200, _prefs_schema_payload())
 
         return self._send_error(404, "not_found", f"no route {path}")
 
@@ -442,71 +401,28 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_allowed():
             return self._send_error(403, "forbidden", "cross-origin request rejected")
 
-        if path == "/api/config":
-            body = self._read_json_body()
-            unknown = [k for k in body if k not in _ALLOWED_KEYS]
-            if unknown:
-                return self._send_error(
-                    400, "unknown_keys",
-                    f"unknown config keys: {', '.join(sorted(unknown))}",
-                )
-            try:
-                _apply_config_patch(body)
-            except ValueError as e:
-                return self._send_error(400, "invalid_value", str(e))
-            return self._send_json(200, _public_config())
-
-        if path == "/api/config/test-key":
-            body = self._read_json_body()
-            key = (body.get("key") or "").strip()
-            if not key:
-                return self._send_error(400, "missing_key", "key required")
-            provider = (body.get("provider") or "anthropic_api").strip()
-            if provider == "openrouter":
-                ok, msg = p_openrouter.test_connection(key)
-            elif provider == "openai":
-                ok, msg = p_openai.test_connection(key)
-            else:
-                ok, msg = p_anthropic_api.test_connection(key)
-            return self._send_json(200, {"ok": ok, "message": msg})
-
-        if path == "/api/config/import":
-            body = self._read_json_body()
-            try:
-                _import_config(body)
-            except ValueError as e:
-                return self._send_error(400, "invalid_import", str(e))
-            return self._send_json(200, _public_config())
-
-        if path == "/api/config/reset":
-            body = self._read_json_body()
-            reset_key = bool(body.get("reset_key", False))
-            config.reset(reset_key=reset_key)
-            invalidate_today_cache()
-            return self._send_json(200, _public_config())
-
-        if path == "/api/prefs":
+        if path == "/api/settings":
             body = self._read_json_body()
             if not isinstance(body, dict):
                 return self._send_error(400, "bad_body", "JSON object required")
-            updates = body.get("updates") if "updates" in body else body
-            if not isinstance(updates, dict):
-                return self._send_error(400, "bad_body", "updates must be a dict")
             try:
-                applied = config.set_many(updates)
+                _apply_settings(body)
             except ValueError as e:
                 return self._send_error(400, "invalid_value", str(e))
-            if "ui.start_on_login" in applied:
-                v = bool(applied["ui.start_on_login"])
-                config.apply_startup_setting(v, _startup_command_target() if v else None)
-            invalidate_today_cache()
-            return self._send_json(200, {"applied": applied,
-                                          "prefs": _prefs_payload()["prefs"]})
+            return self._send_json(200, _settings_payload())
 
-        if path == "/api/open-path":
+        if path == "/api/settings/test-key":
             body = self._read_json_body()
-            target = (body.get("p") or "").strip()
-            return self._send_json(200, {"opened": _open_path(target)})
+            source = str(body.get("source") or "")
+            tester = _KEY_TESTERS.get(source)
+            if tester is None:
+                return self._send_error(400, "unknown_source",
+                                        f"no key for source {source!r}")
+            key = str(body.get("key") or "").strip() or _stored_key(source) or ""
+            if not key:
+                return self._send_error(400, "missing_key", "key required")
+            ok, msg = tester(key)
+            return self._send_json(200, {"ok": ok, "message": msg})
 
         if path == "/api/open-report":
             return self._send_json(200, {"opened": open_report_in_browser()})
@@ -580,71 +496,14 @@ def _build_date() -> str | None:
         return None
 
 
-def _uptime_seconds() -> int:
-    return int(_now_monotonic() - _PROCESS_STARTED)
 
 
-def _log_file_path() -> str:
-    return str(config.config_dir() / "suprbar.log")
 
 
-def _health_payload() -> dict:
-    return {
-        "ok": True,
-        "uptime_seconds": _uptime_seconds(),
-        "last_scan": {
-            "ts": _LAST_SCAN["ts"] or None,
-            "ok": bool(_LAST_SCAN["ok"]),
-            "elapsed_ms": int(_LAST_SCAN["elapsed_ms"]),
-        },
-    }
 
 
-def _safe_self_test(provider) -> dict:
-    """Call a provider's self_test() defensively for /api/diagnostics."""
-    try:
-        return provider.self_test()
-    except Exception as e:
-        return {"ok": False, "last_error": f"{type(e).__name__}: {e!s:.120}"}
 
 
-def _diagnostics_payload() -> dict:
-    cache_meta = None
-    try:
-        data = today_cached()
-        if isinstance(data, dict):
-            cache_meta = data.get("cache_meta")
-    except Exception:
-        cache_meta = None
-
-    return {
-        "python_version": sys.version,
-        "platform": platform.platform(),
-        "pid": os.getpid(),
-        "port": _HTTP_PORT,
-        "uptime_seconds": _uptime_seconds(),
-        "started_at": _PROCESS_STARTED_WALL,
-        "log_file": _log_file_path(),
-        "config_dir": str(config.config_dir()),
-        "config_path": str(config.config_path()),
-        "cache_meta": cache_meta,
-        "sources": {
-            "local": _safe_self_test(p_local),
-            "anthropic_api": _safe_self_test(p_anthropic_api),
-            "hermes": _safe_self_test(p_hermes_local),
-            "opencode": _safe_self_test(p_opencode),
-            "openrouter": _safe_self_test(p_openrouter),
-            "openai": _safe_self_test(p_openai),
-        },
-        "today_cache": {
-            "has_data": _today_cache["data"] is not None,
-            "age_seconds": (
-                round(_now_monotonic() - _today_cache["ts"], 3)
-                if _today_cache["ts"] else None
-            ),
-            "ttl_seconds": _TODAY_TTL,
-        },
-    }
 
 
 def _update_status_payload() -> dict:
@@ -657,97 +516,10 @@ def _update_status_payload() -> dict:
     return {k: v for k, v in st.items() if not k.startswith("_")}
 
 
-def _public_config() -> dict:
-    """Config view safe to send to the UI: never key plaintext."""
-    cfg = config.load()
-    def source_block(name: str) -> dict:
-        src = cfg.get("sources", {}).get(name, {})
-        return {k: v for k, v in src.items() if not str(k).endswith("_enc")}
-
-    anthropic_key = config.get_admin_key() or ""
-    or_key = config.get_source_key("openrouter") or ""
-    oa_key = config.get_source_key("openai") or ""
-    return {
-        "schema_version": cfg.get("schema_version", 1),
-        "sources": {
-            "local": source_block("local"),
-            "anthropic_api": {
-                **source_block("anthropic_api"),
-                "has_key": bool(anthropic_key),
-                "key_fingerprint": _fingerprint(anthropic_key) if anthropic_key else None,
-            },
-            "hermes": source_block("hermes"),
-            "opencode": source_block("opencode"),
-            "openrouter": {
-                **source_block("openrouter"),
-                "has_key": bool(or_key),
-                "key_fingerprint": _fingerprint(or_key) if or_key else None,
-            },
-            "openai": {
-                **source_block("openai"),
-                "has_key": bool(oa_key),
-                "key_fingerprint": _fingerprint(oa_key) if oa_key else None,
-            },
-        },
-        "ui": cfg.get("ui", {}),
-    }
 
 
-def _export_config() -> dict:
-    """Export the current config, scrubbing the encrypted key and surfacing
-    only a fingerprint. Suitable for backup or transferring settings."""
-    cfg = config.load()
-    out = json.loads(json.dumps(cfg))  # deep copy
-    src = out.setdefault("sources", {}).setdefault("anthropic_api", {})
-    src.pop("admin_key_enc", None)
-    key = config.get_admin_key() or ""
-    src["key_fingerprint"] = _fingerprint(key) if key else None
-    return out
 
 
-def _import_config(payload: dict) -> None:
-    """Replace config from an exported payload. Rejects plaintext keys."""
-    if not isinstance(payload, dict):
-        # ValueError (not TypeError): the /api/config/import route maps
-        # ValueError → HTTP 400.
-        raise ValueError("payload must be an object")  # noqa: TRY004
-    # Disallow any plaintext key smuggling (any source, any field name).
-    srcs = payload.get("sources")
-    if isinstance(srcs, dict):
-        for src in srcs.values():
-            if not isinstance(src, dict):
-                continue
-            for forbidden in ("admin_key", "anthropic_api_key", "key",
-                              "api_key", "openrouter_api_key", "openai_api_key"):
-                if src.get(forbidden):
-                    raise ValueError(
-                        f"plaintext keys not accepted (got '{forbidden}')")
-
-    # Preserve existing encrypted keys; never read key blobs from the import.
-    current = config.load()
-    preserved: dict[str, str] = {}
-    for name, src in (current.get("sources") or {}).items():
-        if isinstance(src, dict) and src.get("key_enc"):
-            preserved[name] = src["key_enc"]
-    admin_enc = (current.get("sources", {}).get("anthropic_api", {})
-                 .get("admin_key_enc", ""))
-
-    incoming = json.loads(json.dumps(payload))  # deep copy
-    incoming_srcs = incoming.setdefault("sources", {})
-    # Strip any incoming key material, then restore the local secrets.
-    for src in incoming_srcs.values():
-        if isinstance(src, dict):
-            for k in [k for k in src if str(k).endswith(("_enc", "fingerprint"))]:
-                src.pop(k, None)
-    for name, enc in preserved.items():
-        incoming_srcs.setdefault(name, {})["key_enc"] = enc
-    incoming_srcs.setdefault("anthropic_api", {})["admin_key_enc"] = admin_enc
-
-    # Merge atop defaults to fill in anything missing, then save.
-    from .config import _merge_defaults, _migrate
-    merged = _merge_defaults(_migrate(incoming))
-    config.save(merged)
-    invalidate_today_cache()
 
 
 def _fingerprint(key: str) -> str:
@@ -759,48 +531,80 @@ def _fingerprint(key: str) -> str:
     return f"{key[:6]}…{key[-4:]} (sha256:{h})"
 
 
-def _apply_config_patch(body: dict) -> None:
-    """Apply a partial config update. Supports source keys + toggles."""
-    key_fields = {
-        "anthropic_api_key": config.set_admin_key,
-        "openrouter_api_key": lambda v: config.set_source_key("openrouter", v),
-        "openai_api_key": lambda v: config.set_source_key("openai", v),
-    }
-    for field, setter in key_fields.items():
-        if field in body:
-            v = body[field]
-            if v is None or v == "":
-                setter(None)
-            else:
-                if not isinstance(v, str):
-                    raise ValueError(f"{field} must be a string")
-                ok = setter(v.strip())
-                if not ok:
-                    raise ValueError(f"failed to encrypt and store key ({field})")
-
-    if "anthropic_api_enabled" in body:
-        config.set_anthropic_enabled(bool(body["anthropic_api_enabled"]))
-
-    if "openrouter_api_enabled" in body:
-        config.set_pref("sources.openrouter.enabled",
-                        bool(body["openrouter_api_enabled"]))
-
-    if "openai_api_enabled" in body:
-        config.set_pref("sources.openai.enabled",
-                        bool(body["openai_api_enabled"]))
-
-    if "pinned" in body:
-        config.set_pinned(bool(body["pinned"]))
-
-    if "start_on_login" in body:
-        v = bool(body["start_on_login"])
-        config.set_start_on_login(v)
-        config.apply_startup_setting(v, _startup_command_target() if v else None)
-
-    invalidate_today_cache()
 
 
 # ---------- path opener (sandboxed to home dir) ----------
+
+# ---------- settings ----------
+
+# Settings the UI may change (update bookkeeping stays internal).
+_USER_SETTINGS = tuple(p for p in config.SCHEMA
+                       if p not in ("updates.last_check", "updates.skip_version"))
+_KEY_TESTERS = {
+    "anthropic_api": p_anthropic_api.test_connection,
+    "openrouter": p_openrouter.test_connection,
+    "openai": p_openai.test_connection,
+}
+_settings_callback = None
+
+
+def set_settings_callback(fn) -> None:
+    """``fn(applied)`` runs after every settings change (tray: mini sync)."""
+    global _settings_callback
+    _settings_callback = fn
+
+
+def _stored_key(source: str) -> str | None:
+    if source == "anthropic_api":
+        return config.get_admin_key()
+    return config.get_source_key(source)
+
+
+def _settings_payload() -> dict:
+    """The five settings, key fingerprints (never plaintext) and version."""
+    keys = {}
+    for source in _KEY_TESTERS:
+        k = _stored_key(source)
+        keys[source] = _fingerprint(k) if k else ""
+    return {
+        "settings": {p: config.get_pref(p) for p in _USER_SETTINGS},
+        "keys": keys,
+        "version": __version__,
+    }
+
+
+def _apply_settings(body: dict) -> None:
+    """Validate everything first, then write. Raises ValueError on bad input."""
+    settings = body.get("settings") or {}
+    keys = body.get("keys") or {}
+    if not isinstance(settings, dict) or not isinstance(keys, dict):
+        # ValueError, not TypeError: the route turns it into a 400.
+        raise ValueError("settings and keys must be objects")  # noqa: TRY004
+    for p in settings:
+        if p not in _USER_SETTINGS:
+            raise ValueError(f"unknown setting: {p}")
+    for source, key in keys.items():
+        if source not in _KEY_TESTERS or not isinstance(key, str):
+            raise ValueError(f"bad key entry: {source}")
+    applied = config.set_many(settings) if settings else {}
+    for source, key in keys.items():
+        key = key.strip()
+        ok = (config.set_admin_key(key) if source == "anthropic_api"
+              else config.set_source_key(source, key))
+        if not ok:
+            raise ValueError(f"could not store the {source} key")
+        applied[f"keys.{source}"] = bool(key)
+    if "ui.start_on_login" in applied:
+        v = bool(applied["ui.start_on_login"])
+        config.apply_startup_setting(v, _startup_command_target() if v else None)
+    # Sources or keys changed what gets counted: drop every cached result.
+    invalidate_today_cache()
+    if _settings_callback is not None:
+        try:
+            _settings_callback(applied)
+        except Exception:
+            log.exception("settings callback failed")
+
 
 def _startup_command_target() -> str | None:
     """What the HKCU Run entry should point at.
@@ -828,62 +632,10 @@ def _range_payload(qs: dict) -> dict:
     return range_cached(key, cs, ce)
 
 
-def _prefs_payload() -> dict:
-    """Return mutable preferences (no key material of any kind)."""
-    cfg = config.load()
-    public = json.loads(json.dumps(cfg))
-    # never expose encrypted blobs from any source
-    for src in (public.get("sources") or {}).values():
-        if isinstance(src, dict):
-            for k in [k for k in src if str(k).endswith("_enc")]:
-                src.pop(k, None)
-    anthropic = (public.get("sources") or {}).get("anthropic_api")
-    if isinstance(anthropic, dict):
-        anthropic["has_key"] = config.has_admin_key()
-    openrouter = (public.get("sources") or {}).get("openrouter")
-    if isinstance(openrouter, dict):
-        openrouter["has_key"] = config.get_source_key("openrouter") is not None
-    openai = (public.get("sources") or {}).get("openai")
-    if isinstance(openai, dict):
-        openai["has_key"] = config.get_source_key("openai") is not None
-    return {"prefs": public, "schema_version": cfg.get("schema_version", 1)}
 
 
-def _prefs_schema_payload() -> dict:
-    """Return the SCHEMA dict in a form the UI can render generically."""
-    out = []
-    for path, typ in config.SCHEMA.items():
-        entry: dict = {"path": path, "type": typ}
-        # default value pulled from current config (which is defaults-merged)
-        entry["default"] = config.get_pref(path)
-        out.append(entry)
-    return {"settings": out}
 
 
-def _open_path(target: str) -> bool:
-    if not target:
-        return False
-    try:
-        p = Path(target).expanduser().resolve()
-    except (OSError, ValueError):
-        return False
-    home = Path.home().resolve()
-    try:
-        p.relative_to(home)
-    except ValueError:
-        return False
-    if not p.exists():
-        return False
-    try:
-        if sys.platform == "win32":
-            os.startfile(str(p))  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(p)])
-        else:
-            subprocess.Popen(["xdg-open", str(p)])
-        return True
-    except OSError:
-        return False
 
 
 def open_report_in_browser() -> bool:
