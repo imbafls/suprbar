@@ -33,7 +33,7 @@ One item per loop iteration, in order; tick only with evidence.
 ## 4. Verify
 - [x] pytest, ruff, mypy (default + `--platform linux`) green — 33 passed (incl. 2 Playwright UI smoke), ruff suprbar+tests clean (5 pre-existing findings only in scripts/, not linted by CI, untouched by v2), mypy ×2 clean, CI extras: pricing self-test OK, import check OK; tray-side imports leave `webview` unloaded
 - [x] Source run: flyout open/close/toggle/idle-exit, mini on/off, settings changes (harness + tray WM_NOTIFY) — SUPRBAR_FORCE source instance on :47822 driven by WM_NOTIFY + /api/settings: 11/11 (click open/close, dbl-click open/close, middle-click pin ×2, idle exit, mini on/off via settings callback, login Run value written+removed, source toggle changes counted sources); settings restored; quit 0.6 s. Note: a re-click within 0.35 s of a close is ignored by design (toggle grace)
-- [ ] Browser screenshots of flyout, settings, report at 360x480 look right
+- [x] Browser screenshots of flyout, settings, report at 360x480 look right — flyout Today ($559.43, live, burn, chips, hourly bars) and 90d ($109,012, 90 daily bars, 5+5 rows fit), settings sheet (top + scrolled General section) all clean; report: desktop OK and budget card gone; fixed at 360 px: 8 px horizontal overflow (hero grid min-content) + KPI values spilling, and the hard-coded 'May 2026' tab title now shows the real range; 0 console errors; gate green
 - [ ] Numbers match the v0.16 scanner for today / 7d / 30d / 90d
 - [ ] Idle memory (1 process, <= ~55 MB) and flyout-open memory measured; no errors in logs
 

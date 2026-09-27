@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>supr.bar · Usage Report · May 2026</title>
+<title>supr.bar · Usage Report</title>
 <style>
 /* ============================================================================
    supr.bar — Usage Report  ·  30-day spend report (standalone, self-contained)
@@ -266,8 +266,11 @@ body{
 
 /* ====================  RESPONSIVE  ===================================== */
 @media (max-width:860px){
-  .hero{ grid-template-columns:1fr; gap:22px; }
-  .kpis{ grid-template-columns:repeat(2,1fr); }
+  .hero{ grid-template-columns:minmax(0,1fr); gap:22px; }
+  .hero-num{ font-size:clamp(40px, 15vw, 76px); }
+  .kpi{ min-width:0; }
+  .kpi .v{ font-size:clamp(13px, 4.2vw, 23px); white-space:nowrap; }
+  .kpis{ grid-template-columns:repeat(2,minmax(0,1fr)); }
   .grid-2{ grid-template-columns:1fr; }
   .insights{ grid-template-columns:1fr; }
   .tok-grid{ grid-template-columns:1fr; }
@@ -461,6 +464,7 @@ const deltaPct = REPORT.totals.prevMonthCost>0 ? (total-REPORT.totals.prevMonthC
 
 /* ---------- header ---------- */
 $("#rhRange").textContent = REPORT.meta.rangeLabel;
+document.title = "supr.bar · Usage Report · " + REPORT.meta.rangeLabel;
 $("#rhGen").innerHTML = "<b>"+REPORT.meta.generated+"</b>";
 $("#rhSrc").innerHTML = "<b>"+esc(REPORT.meta.source)+"</b>";
 $("#rhMachine").innerHTML = "<b>"+esc(REPORT.meta.machine)+"</b>";
