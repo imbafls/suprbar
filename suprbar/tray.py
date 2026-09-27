@@ -620,38 +620,33 @@ class TrayApp:
             menu,
         )
 
-        # Bind double-click and middle-click via pystray's _on_notify hook.
-        # The signature is (icon, button, time) on Windows; we read the
-        # button value to distinguish middle vs left-double.
-        if sys.platform == "win32":
-            _orig_notify = getattr(self._icon, "_on_notify", None)
+        # Middle-click toggles pin; a double-click counts as one click.
+        # pystray's win32 backend dispatches through the _message_handlers
+        # dict it builds in __init__, so the handler must be replaced there —
+        # rebinding the _on_notify attribute afterwards is never called.
+        handlers = getattr(self._icon, "_message_handlers", None)
+        if sys.platform == "win32" and isinstance(handlers, dict):
+            from pystray._util import win32 as _w32
+            orig_notify = handlers.get(_w32.WM_NOTIFY)
+            swallow_up = False
 
             def notify_wrapper(wparam, lparam):
-                try:
-                    # lparam low word is the mouse message. WM_LBUTTONDBLCLK
-                    # = 0x0203 ; WM_MBUTTONDOWN = 0x0207.
-                    msg = lparam & 0xFFFF
-                    if msg == 0x0203:  # double left click
-                        self._on_default(self._icon, None)
-                        return
-                    if msg == 0x0207:  # middle button down
-                        self._on_middle(self._icon, None)
-                        return
-                except Exception:
-                    pass
-                if callable(_orig_notify):
-                    try:
-                        _orig_notify(wparam, lparam)
-                    except Exception:
-                        pass
+                nonlocal swallow_up
+                msg = lparam & 0xFFFF
+                if msg == 0x0207:  # WM_MBUTTONDOWN
+                    self._on_middle(self._icon, None)
+                    return 0
+                if msg == 0x0203:  # WM_LBUTTONDBLCLK
+                    # Windows sends up, dblclk, up: the first up already
+                    # toggled, so drop the second instead of toggling back.
+                    swallow_up = True
+                    return 0
+                if msg == 0x0202 and swallow_up:  # WM_LBUTTONUP
+                    swallow_up = False
+                    return 0
+                return orig_notify(wparam, lparam) if orig_notify else 0
 
-            try:
-                # Only override if the backend exposes _on_notify so we don't
-                # break other platforms.
-                if _orig_notify is not None:
-                    self._icon._on_notify = notify_wrapper  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            handlers[_w32.WM_NOTIFY] = notify_wrapper
 
         threading.Thread(target=self._refresh_loop, daemon=True,
                          name="suprbar-refresh").start()
