@@ -41,7 +41,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] README (features, status v2.0), CHANGELOG v2.0.0, memory file updated if the model changed — README rewritten (features, the 5 settings, tray menu, updating, privacy incl. the corrected 127.0.0.1 note, how it stays light, architecture); stale theme sections dropped from docs/extending.md + CONTRIBUTING.md; CHANGELOG v2.0.0 lists kept/settings/removed/10 fixes/number parity; memory file + MEMORY.md index updated for v2
 
 ## 6. Release
-- [ ] Version 2.0.0 in `__init__.py`, `pyproject.toml`, `installer.iss`; commit; push main
+- [x] Version 2.0.0 in `__init__.py`, `pyproject.toml`, `installer.iss`; commit; push main — all three read 2.0.0, gate green; main pushed (see git log)
 - [ ] Tag v2.0.0, push tag; Release + CI workflows green (fix forward if not)
 
 ## 7. Install
