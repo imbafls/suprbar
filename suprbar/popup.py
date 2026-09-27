@@ -40,6 +40,7 @@ log = logging.getLogger("suprbar.popup")
 WIN_W = 360
 WIN_H = 480
 MARGIN = 12
+LOAD_WAIT_SECONDS = 3.0
 
 
 
@@ -389,6 +390,9 @@ class FlyoutBridge:
         self._toggle_grace_seconds = 0.35
         # Settings-open hint; the page reads it via consume_pending_open().
         self._open_settings_next_show = False
+        # Set once the page has loaded: a cold window shown before that is an
+        # empty dark box (the "blank flyout").
+        self._loaded = threading.Event()
 
     def attach_window(self, w: webview.Window) -> None:
         self._window = w
@@ -401,6 +405,10 @@ class FlyoutBridge:
                     break
                 time.sleep(0.05)
         return self._hwnd
+
+    def on_loaded(self) -> None:
+        self.decorate()
+        self._loaded.set()
 
     def decorate(self) -> None:
         hwnd = self._resolve_hwnd()
@@ -425,6 +433,9 @@ class FlyoutBridge:
     def show(self) -> None:
         if self._window is None:
             return
+        # First show only: wait for the page (bounded, so a slow load still
+        # shows something); every later show is instant.
+        self._loaded.wait(LOAD_WAIT_SECONDS)
         with self._lock:
             _place(self._resolve_hwnd())
             try:
@@ -539,5 +550,5 @@ def build_window(url: str, bridge: FlyoutBridge) -> webview.Window:
     # Window in practice.
     assert w is not None
     bridge.attach_window(w)
-    w.events.loaded += bridge.decorate
+    w.events.loaded += bridge.on_loaded
     return w
