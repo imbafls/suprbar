@@ -125,6 +125,16 @@ class _Child:
             threading.Thread(target=_reap, daemon=True,
                              name=f"suprbar-{self.kind}-reap").start()
 
+    def join(self) -> None:
+        """Wait for a stopping child (its reaper kills it after the grace)."""
+        p = self._proc
+        if p is None:
+            return
+        try:
+            p.wait(timeout=_STOP_GRACE_SECONDS + 1.0)
+        except subprocess.TimeoutExpired:
+            pass
+
     def _read_events(self, proc: subprocess.Popen[bytes]) -> None:
         if proc.stdout is None:
             return
@@ -173,6 +183,9 @@ class MiniController:
     def stop(self, wait: bool = False) -> None:
         self._child.stop(wait=wait)
 
+    def join(self) -> None:
+        self._child.join()
+
     def _on_event(self, event: str) -> None:
         if event == "open_flyout":
             self._flyout.show()
@@ -210,9 +223,12 @@ class FlyoutController:
         self._child.send("settings")
 
     def quit(self) -> None:
+        # Both children close at once; each is killed after the grace period.
         self._cancel_idle_exit()
-        self._child.stop(wait=True)
-        self.mini.stop(wait=True)
+        self._child.stop()
+        self.mini.stop()
+        self._child.join()
+        self.mini.join()
 
     # ---- child events ----
 

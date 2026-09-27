@@ -22,7 +22,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] T4 Fixed internals (pricing URL, log level, live threshold, range prefs, cache TTL) — REMOTE_URL constant (refresh_remote(force)=True), INFO/SUPRBAR_LOG logging, 60 s live window shared by scanner+opencode, range/report ignore range prefs, idle today TTL 25 s < 30 s poll; 5 config accessors deleted; grep clean; gate green
 - [x] T5 Config schema v5 + migration (tests first) — 6 new tests written first (5 failed), now pass; SCHEMA = 12 paths (6 sources, mini, pin, login, 3 update); copy of real config.json: v4→v5, sources incl. key blobs identical, 5 top-level keys; gate green (25 passed)
 - [x] T6 Settings API (tests first), remove old routes — tests/test_server_settings.py (6 tests, written first, errored) now pass: shape w/o plaintext keys, each setting persists, login applied, mini callback fires, bad paths 400, key set/clear, test-key source check, 13 removed routes 404; old config/prefs/health/diagnostics/open-path code + 5 config helpers deleted; gate green (29 passed)
-- [ ] T7 Tray menu trim + clean quit
+- [x] T7 Tray menu trim + clean quit — build_menu(): Open, Mini overlay, Refresh, 30-day report, Settings…, Quit (+ hidden-unless-available Update); Pin/About/Check-for-updates gone; children stop in parallel + 6 s os._exit watchdog; periodic check obeys updates.check_on_launch; source instance with flyout child quit via /api/quit in 1.1 s, 0 leftover descendants; gate green
 - [ ] T8 New flyout page (index.html + app.js)
 - [ ] T9 Trim styles.css
 - [ ] T10 Trim the mini overlay

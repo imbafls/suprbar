@@ -187,6 +187,8 @@ def main() -> int:
             shutdown_event.wait(6 * 3600)  # 6 hours
             if shutdown_event.is_set():
                 break
+            if not config.get_pref("updates.check_on_launch", True):
+                continue
             try:
                 st = updater.check_for_update()
                 if st.get("available"):

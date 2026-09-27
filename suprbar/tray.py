@@ -8,14 +8,15 @@ variant adds a green dot when an active Claude Code session is detected.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
+import time
 
 import pystray
 from PIL import Image, ImageDraw, ImageFont
 
 from . import config, server, updater
-from . import __version__
 from .windows import FlyoutController
 
 log = logging.getLogger("suprbar.tray")
@@ -27,6 +28,7 @@ log = logging.getLogger("suprbar.tray")
 REFRESH_SECONDS = 30
 REFRESH_IDLE_SECONDS = 90
 PULSE_MS = 300
+QUIT_WATCHDOG_SECONDS = 6.0
 
 
 # ---------- Icon drawing ----------
@@ -236,14 +238,7 @@ class TrayApp:
         except Exception:
             log.exception("open report failed")
 
-    def _on_pin_toggle(self, icon, item):
-        new = not config.is_pinned()
-        config.set_pinned(new)
-        if self._icon:
-            self._icon.update_menu()
 
-    def _is_pinned(self, item) -> bool:
-        return config.is_pinned()
 
     def _on_settings(self, icon, item):
         try:
@@ -251,15 +246,6 @@ class TrayApp:
         except Exception:
             log.exception("open settings failed")
 
-    def _on_about(self, icon, item):
-        try:
-            if self._icon:
-                self._icon.notify(
-                    f"supr.bar v{__version__}",
-                    "Tray app for Claude Code usage",
-                )
-        except Exception:
-            log.exception("notify failed")
 
     # ---- update menu callbacks ----
 
@@ -271,19 +257,6 @@ class TrayApp:
         st = updater.cached_status() or {}
         return f"Update to v{st.get('latest')}…" if st.get("available") else "Update"
 
-    def _on_check_updates(self, icon, item):
-        def _bg():
-            st = updater.check_for_update()
-            try:
-                if self._icon:
-                    self._icon.update_menu()
-                    self._icon.notify(
-                        "supr.bar",
-                        f"Update available: v{st.get('latest')}" if st.get("available")
-                        else "You're on the latest version.")
-            except Exception:
-                pass
-        threading.Thread(target=_bg, daemon=True).start()
 
     def _on_apply_update(self, icon, item):
         # Same path the flyout button uses; updater quits the app when done.
@@ -291,6 +264,15 @@ class TrayApp:
             target=updater.download_and_apply, daemon=True).start()
 
     def _on_quit(self, icon, item):
+        # Whatever hangs (a child, pystray, a scan thread), the process must
+        # be gone within a few seconds: a zombie tray keeps the port and the
+        # single-instance lock and blocks the next launch.
+        def _force_exit():
+            time.sleep(QUIT_WATCHDOG_SECONDS)
+            log.warning("shutdown hung — forcing exit")
+            os._exit(0)
+        threading.Thread(target=_force_exit, daemon=True,
+                         name="suprbar-exit-watchdog").start()
         self._stop.set()
         try:
             self.bridge.quit()
@@ -448,24 +430,26 @@ class TrayApp:
 
     # ---- run ----
 
-    def run(self):
-        menu = pystray.Menu(
+    def build_menu(self) -> pystray.Menu:
+        """Six items; "Update to vX…" appears only when a release is out.
+
+        Pin lives on the flyout's pin button and on tray middle-click.
+        """
+        return pystray.Menu(
             pystray.MenuItem("Open supr.bar", self._on_default, default=True),
-            pystray.MenuItem("Refresh now", self._on_refresh),
-            pystray.MenuItem("Check for updates", self._on_check_updates),
-            pystray.MenuItem(self._update_item_text, self._on_apply_update,
-                             visible=lambda item: self._update_available()),
-            pystray.MenuItem("30-day report…", self._on_report),
-            pystray.MenuItem("Pin (don't auto-hide)", self._on_pin_toggle,
-                             checked=self._is_pinned),
             pystray.MenuItem("Mini overlay", self._on_mini_toggle,
                              checked=self._is_mini_enabled),
-            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Refresh", self._on_refresh),
+            pystray.MenuItem("30-day report", self._on_report),
             pystray.MenuItem("Settings…", self._on_settings),
-            pystray.MenuItem("About supr.bar", self._on_about),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem(self._update_item_text, self._on_apply_update,
+                             visible=lambda item: self._update_available()),
             pystray.MenuItem("Quit", self._on_quit),
         )
+
+    def run(self):
+        menu = self.build_menu()
         self._icon = pystray.Icon(
             "suprbar",
             self._idle_icon,
