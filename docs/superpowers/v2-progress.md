@@ -13,10 +13,22 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] Write `docs/superpowers/specs/2026-09-27-suprbar-v2-design.md` and self-review it — spec covers screen, 5 settings + consumers, tray, 16 routes kept / 11 removed, v4→v5 migration, errors, tests, verification; placeholder scan clean
 
 ## 2. Plan
-- [ ] Write `docs/superpowers/plans/2026-09-27-suprbar-v2.md` (ordered small tasks + verification) and append its tasks to section 3 below
+- [x] Write `docs/superpowers/plans/2026-09-27-suprbar-v2.md` (ordered small tasks + verification) and append its tasks to section 3 below — 13 tasks, each with its own check + the pytest/ruff/mypy×2 gate
 
 ## 3. Implement
-(tasks are added from the plan)
+- [ ] T1 Remove budgets
+- [ ] T2 Remove project filters, anonymize, top-N
+- [ ] T3 Fixed flyout placement, no click-through
+- [ ] T4 Fixed internals (pricing URL, log level, live threshold, range prefs, cache TTL)
+- [ ] T5 Config schema v5 + migration (tests first)
+- [ ] T6 Settings API (tests first), remove old routes
+- [ ] T7 Tray menu trim + clean quit
+- [ ] T8 New flyout page (index.html + app.js)
+- [ ] T9 Trim styles.css
+- [ ] T10 Trim the mini overlay
+- [ ] T11 Blank-flyout guard
+- [ ] T12 Scanner rollover + index equality tests
+- [ ] T13 UI smoke test + dead-code sweep
 
 ## 4. Verify
 - [ ] pytest, ruff, mypy (default + `--platform linux`) green
