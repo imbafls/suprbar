@@ -852,12 +852,8 @@ def _prefs_payload() -> dict:
 def _prefs_schema_payload() -> dict:
     """Return the SCHEMA dict in a form the UI can render generically."""
     out = []
-    for path, (typ, arg) in config.SCHEMA.items():
+    for path, typ in config.SCHEMA.items():
         entry: dict = {"path": path, "type": typ}
-        if typ == "enum":
-            entry["options"] = list(arg)
-        elif typ in ("int", "float") and arg is not None:
-            entry["min"], entry["max"] = arg
         # default value pulled from current config (which is defaults-merged)
         entry["default"] = config.get_pref(path)
         out.append(entry)

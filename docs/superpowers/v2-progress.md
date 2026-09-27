@@ -20,7 +20,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] T2 Remove project filters, anonymize, top-N — params gone from scanner/server/report, config helpers deleted (schema keys go in T5); 7d/30d/90d totals differ from baseline by exactly today's live growth (+8 msgs / +$5.9471 each); gate green
 - [x] T3 Fixed flyout placement, no click-through — flyout placed in physical px with the monitor's DPI (was logical-on-physical, off-screen on scaled displays); no drag/resize/saved pos/click-through anywhere; harness: window rect (1548,660,360,480) == flyout_rect() on show, re-show and after toggle; gate green
 - [x] T4 Fixed internals (pricing URL, log level, live threshold, range prefs, cache TTL) — REMOTE_URL constant (refresh_remote(force)=True), INFO/SUPRBAR_LOG logging, 60 s live window shared by scanner+opencode, range/report ignore range prefs, idle today TTL 25 s < 30 s poll; 5 config accessors deleted; grep clean; gate green
-- [ ] T5 Config schema v5 + migration (tests first)
+- [x] T5 Config schema v5 + migration (tests first) — 6 new tests written first (5 failed), now pass; SCHEMA = 12 paths (6 sources, mini, pin, login, 3 update); copy of real config.json: v4→v5, sources incl. key blobs identical, 5 top-level keys; gate green (25 passed)
 - [ ] T6 Settings API (tests first), remove old routes
 - [ ] T7 Tray menu trim + clean quit
 - [ ] T8 New flyout page (index.html + app.js)

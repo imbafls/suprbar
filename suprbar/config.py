@@ -39,12 +39,14 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
+# v2.0 keeps five settings: sources (+ their API keys), the mini overlay,
+# pin, start on login and the launch update check. Everything else that used
+# to be a setting is fixed behaviour now (see the v2 design spec).
 DEFAULTS: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
 
-    # ---- Sources ----
     "sources": {
         "local": {"enabled": True},
         "anthropic_api": {
@@ -63,83 +65,21 @@ DEFAULTS: dict[str, Any] = {
         },
     },
 
-    # ---- Tray + startup ----
     "ui": {
-        "pinned": False,
+        "pinned": False,                # flyout stays open when focus leaves
         "start_on_login": False,
     },
 
-    # ---- Time range / filter prefs ----
-    "range": {
-        "default": "today",            # today|24h|7d|week|month|30d|90d
-        "week_starts_on": "mon",       # sun|mon
-    },
-
-    # ---- Display prefs ----
-    "display": {
-        "theme":       "dark",         # dark|light|auto
-        "accent":      "blue",         # violet|blue|green|orange|pink (blue = refined indigo, the redesign default)
-        "density":     "normal",       # compact|normal|spacious
-        "font_scale":  1.0,            # 0.85..1.25
-        "cost_format": "with_cents",   # with_cents|whole
-        "animations": True,            # toggle all UI animations
-    },
-
-    # ---- Budgets & alerts ----
-    "budgets": {
-        "daily_limit":   0.0,          # 0 = no limit
-        "weekly_limit":  0.0,
-        "monthly_limit": 0.0,
-        "alert_at_pct":  80,           # alert when >= this % of any active limit
-        "notify":        True,         # notify when a budget crosses its threshold
-        "tray_warn_color": True,       # tint tray icon amber/red on warning
-        "project_limits": [],          # per-project daily caps: "project=amount"
-    },
-
-    # ---- Updates ----
-    "updates": {
-        "check_on_launch": True,       # background version check at startup
-        "last_check":      "",         # ISO-8601 of last check ("" = never)
-        "skip_version":    "",         # release the user chose to skip ("" = none)
-    },
-
-    # ---- Behavior ----
-    "behavior": {
-        "refresh_seconds":       5,    # 0=manual, else auto-refresh cadence (s)
-        "auto_hide":             True, # auto-hide popup on blur
-        "always_on_top":         True,
-        "live_threshold_seconds": 60,  # JSONL mtime within X = "live"
-        "confirm_quit":          False,
-        "click_through":         False, # popup transparent to clicks
-    },
-
-    # ---- Mini overlay (always-on-top HUD) ----
     "mini": {
-        "enabled":       False,  # show the mini overlay
-        "show_burn":     True,   # include $/h burn rate in the overlay
-        "click_through": False,  # overlay is transparent to mouse clicks
+        "enabled": False,               # always-on-top rolling-24h chip
     },
 
-    # ---- Pricing ----
-    "pricing": {
-        # Optional URL for a hosted rate table (JSON). Empty = local only.
-        "remote_url": "https://raw.githubusercontent.com/imbafls/suprbar/main/pricing.json",
-    },
-
-    # ---- Project filters ----
-    "projects": {
-        "allowlist": [],               # if non-empty, ONLY these projects show
-        "denylist":  [],               # always hidden
-        "anonymize": False,            # show "project-1", "project-2" etc
-        "top_n":     10,               # limit list to top N by cost
-    },
-
-    # ---- Data / privacy ----
-    "data": {
-        "log_level": "INFO",           # OFF|ERROR|WARN|INFO|DEBUG
+    "updates": {
+        "check_on_launch": True,        # launch + 6-hourly release check
+        "last_check":      "",          # internal: ISO-8601 of last check
+        "skip_version":    "",          # internal: release the user skipped
     },
 }
-
 
 _lock = threading.Lock()
 _cache: dict[str, Any] | None = None
@@ -221,74 +161,42 @@ def _deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> None:
             dst[k] = v
 
 
-# Settings removed in schema v3 (the v0.7 simplification) and v4 (the v0.15
-# settings trim). Pruned from any older config on load so the on-disk file
-# converges on the lean schema and the settings UI never renders a control the
-# backend ignores.
-_REMOVED_SECTIONS = ("keyboard", "window")
-_REMOVED_KEYS: dict[str, tuple[str, ...]] = {
-    "range":    ("compare_previous", "custom_start", "custom_end",
-                 "day_boundary", "rolling_24h", "include_weekends"),
-    "display":  ("currency", "locale", "token_format",
-                 "show_token_bar", "show_cache_info", "show_burn_rate",
-                 "show_model", "show_project", "show_sessions_today"),
-    "budgets":  ("audio_alert", "quiet_hours", "quiet_start", "quiet_end"),
-    "behavior": ("show_in_taskbar", "start_minimized", "single_instance",
-                 "open_dashboard_on_click", "auto_hide_delay_ms"),
-    "data":     ("log_retention_days", "anonymize_logs", "cache_ttl_seconds",
-                 "telemetry"),
-    "sources":  ("cost_mode",),
-}
-_VALID_RANGE_DEFAULTS = ("today", "24h", "7d", "week", "month", "30d", "90d")
-
-
-def _prune_removed_keys(d: dict[str, Any]) -> None:
-    for section in _REMOVED_SECTIONS:
-        d.pop(section, None)
-    for section, keys in _REMOVED_KEYS.items():
-        sub = d.get(section)
-        if isinstance(sub, dict):
-            for k in keys:
-                sub.pop(k, None)
-    src = d.get("sources")
-    if isinstance(src, dict) and isinstance(src.get("anthropic_api"), dict):
-        src["anthropic_api"].pop("poll_seconds", None)
-    rng = d.get("range")
-    if isinstance(rng, dict) and rng.get("default") not in _VALID_RANGE_DEFAULTS:
-        rng["default"] = "today"
-
-
 def _migrate(d: dict[str, Any]) -> dict[str, Any]:
-    """Bump older configs to the current schema."""
+    """Project any pre-v5 config onto the v5 schema.
+
+    Sources (enabled flags and encrypted key blobs) are kept verbatim, as are
+    the mini overlay, start-on-login and update state. Turning auto-hide off
+    used to mean "keep the flyout open", which is what pin means now, so it
+    carries over as pin. Every other key is dropped.
+    """
     if not isinstance(d, dict):
         return json.loads(json.dumps(DEFAULTS))
     v = d.get("schema_version")
-    if not isinstance(v, int) or v < 1:
-        if "sources" not in d or not isinstance(d.get("sources"), dict):
-            d["sources"] = json.loads(json.dumps(DEFAULTS["sources"]))
-        if "ui" not in d or not isinstance(d.get("ui"), dict):
-            d["ui"] = json.loads(json.dumps(DEFAULTS["ui"]))
-        d["schema_version"] = 1
-        log.info("config migrated to schema_version=1")
-    if d.get("schema_version") == 1:
-        # v1 → v2: introduce range/display/budgets/behavior/projects/data/window.
-        # _merge_defaults fills the new sections in.
-        d["schema_version"] = 2
-        log.info("config migrated to schema_version=2")
-    if d.get("schema_version") == 2:
-        # v2 → v3: drop ~32 settings that were never wired (the v0.7 trim).
-        _prune_removed_keys(d)
-        d["schema_version"] = 3
-        log.info("config migrated to schema_version=3")
-    if d.get("schema_version") == 3:
-        # v3 → v4: trim 14 niche toggles (utc day boundary, weekend filter,
-        # token formatting, per-element visibility, auto-hide delay, density,
-        # fixed window size) — the window is drag-resizable and the glance UI
-        # already curates what to show.
-        _prune_removed_keys(d)
-        d["schema_version"] = 4
-        log.info("config migrated to schema_version=4")
-    return d
+    if isinstance(v, int) and v >= SCHEMA_VERSION:
+        return d
+
+    def section(name: str) -> dict[str, Any]:
+        sec = d.get(name)
+        return sec if isinstance(sec, dict) else {}
+
+    ui, behavior = section("ui"), section("behavior")
+    out: dict[str, Any] = {"schema_version": SCHEMA_VERSION}
+    sources = section("sources")
+    if sources:
+        out["sources"] = sources
+    out["ui"] = {
+        "pinned": bool(ui.get("pinned")) or behavior.get("auto_hide") is False,
+        "start_on_login": bool(ui.get("start_on_login", False)),
+    }
+    if "enabled" in section("mini"):
+        out["mini"] = {"enabled": bool(section("mini")["enabled"])}
+    updates = {k: section("updates")[k]
+               for k in ("check_on_launch", "last_check", "skip_version")
+               if k in section("updates")}
+    if updates:
+        out["updates"] = updates
+    log.info("config migrated to schema_version=%d", SCHEMA_VERSION)
+    return out
 
 
 def _file_sig(p: Path) -> tuple[int, int] | None:
@@ -386,119 +294,35 @@ def set_pref(path: str, value: Any) -> Any:
 
 # ---------- coercion / validation ----------
 
-# (key path) -> (type, allowed values | (lo, hi) | None)
-SCHEMA: dict[str, tuple[str, Any]] = {
-    # range
-    "range.default":          ("enum", ("today", "24h", "7d", "week", "month", "30d", "90d")),
-    "range.week_starts_on":   ("enum", ("sun", "mon")),
-
-    # display
-    "display.theme":          ("enum", ("dark", "light", "auto")),
-    "display.accent":         ("enum", ("violet", "blue", "green", "orange", "pink")),
-    "display.density":        ("enum", ("compact", "normal", "spacious")),
-    "display.font_scale":     ("float", (0.85, 1.25)),
-    "display.cost_format":    ("enum", ("with_cents", "whole")),
-    "display.animations":         ("bool", None),
-
-    # budgets
-    "budgets.daily_limit":    ("float", (0.0, 1e9)),
-    "budgets.weekly_limit":   ("float", (0.0, 1e9)),
-    "budgets.monthly_limit":  ("float", (0.0, 1e9)),
-    "budgets.alert_at_pct":   ("int", (1, 100)),
-    "budgets.notify":         ("bool", None),
-    "budgets.tray_warn_color": ("bool", None),
-    "budgets.project_limits":  ("list_str", None),
-
-    # behavior
-    "behavior.refresh_seconds":      ("int", (0, 3600)),
-    "behavior.auto_hide":            ("bool", None),
-    "behavior.always_on_top":        ("bool", None),
-    "behavior.live_threshold_seconds": ("int", (5, 600)),
-    "behavior.confirm_quit":         ("bool", None),
-    "behavior.click_through":        ("bool", None),
-
-    # mini overlay
-    "mini.enabled":       ("bool", None),
-    "mini.show_burn":     ("bool", None),
-    "mini.click_through": ("bool", None),
-
-    # pricing
-    "pricing.remote_url": ("str", None),
-
-    # projects
-    "projects.allowlist":     ("list_str", None),
-    "projects.denylist":      ("list_str", None),
-    "projects.anonymize":     ("bool", None),
-    "projects.top_n":         ("int", (1, 100)),
-
-    # data
-    "data.log_level":          ("enum", ("OFF", "ERROR", "WARN", "INFO", "DEBUG")),
-
-    # updates
-    "updates.check_on_launch": ("bool", None),
-    "updates.last_check":      ("str", None),
-    "updates.skip_version":    ("str", None),
-
-    # tray + startup
-    "ui.pinned":         ("bool", None),
-    "ui.start_on_login": ("bool", None),
-
-    # sources
-    "sources.local.enabled":               ("bool", None),
-    "sources.anthropic_api.enabled":       ("bool", None),
-    "sources.hermes.enabled":              ("bool", None),
-    "sources.opencode.enabled":            ("bool", None),
-    "sources.openrouter.enabled":          ("bool", None),
-    "sources.openai.enabled":              ("bool", None),
+# (key path) -> type. The only settings there are.
+SCHEMA: dict[str, str] = {
+    "sources.local.enabled":         "bool",
+    "sources.anthropic_api.enabled": "bool",
+    "sources.hermes.enabled":        "bool",
+    "sources.opencode.enabled":      "bool",
+    "sources.openrouter.enabled":    "bool",
+    "sources.openai.enabled":        "bool",
+    "mini.enabled":                  "bool",
+    "ui.pinned":                     "bool",
+    "ui.start_on_login":             "bool",
+    "updates.check_on_launch":       "bool",
+    "updates.last_check":            "str",
+    "updates.skip_version":          "str",
 }
 
 
 def _coerce(path: str, value: Any) -> Any:
-    spec = SCHEMA.get(path)
-    if spec is None:
+    typ = SCHEMA.get(path)
+    if typ is None:
         raise ValueError(f"unknown setting: {path}")
-    typ, arg = spec
+    # ValueError (not TypeError) throughout: callers turn it into a 400.
     if typ == "bool":
-        return bool(value)
-    if typ == "int":
-        try:
-            n = int(value)
-        except (TypeError, ValueError):
-            raise ValueError(f"{path} expects integer, got {value!r}")
-        if arg is not None:
-            lo, hi = arg
-            if not (lo <= n <= hi):
-                raise ValueError(f"{path} must be in [{lo}, {hi}], got {n}")
-        return n
-    if typ == "float":
-        try:
-            f = float(value)
-        except (TypeError, ValueError):
-            raise ValueError(f"{path} expects number, got {value!r}")
-        if arg is not None:
-            lo, hi = arg
-            if not (lo <= f <= hi):
-                raise ValueError(f"{path} must be in [{lo}, {hi}], got {f}")
-        return f
-    if typ == "enum":
-        if value not in arg:
-            raise ValueError(f"{path} must be one of {arg}, got {value!r}")
+        if not isinstance(value, bool):
+            raise ValueError(f"{path} expects true/false, got {value!r}")
         return value
-    if typ == "str":
-        if not isinstance(value, str):
-            raise ValueError(f"{path} expects string, got {value!r}")
-        return value
-    if typ == "list_str":
-        if not isinstance(value, list):
-            raise ValueError(f"{path} expects list, got {value!r}")
-        return [str(x) for x in value]
-    if typ == "date_or_null":
-        if value in (None, ""):
-            return None
-        if not isinstance(value, str) or len(value) != 10:
-            raise ValueError(f"{path} expects YYYY-MM-DD or null, got {value!r}")
-        return value
-    raise ValueError(f"unhandled schema type for {path}: {typ}")
+    if not isinstance(value, str):
+        raise ValueError(f"{path} expects string, got {value!r}")  # noqa: TRY004
+    return value
 
 
 def set_many(updates: dict[str, Any]) -> dict[str, Any]:
@@ -629,22 +453,10 @@ def set_start_on_login(v: bool) -> None:
     save(cfg)
 
 
-# ---------- Behavior accessors used by other modules ----------
-
-
-
-
-
-
-
-# ---------- Mini overlay accessors ----------
+# ---------- Mini overlay ----------
 
 def mini_enabled() -> bool:
     return bool(get_pref("mini.enabled", False))
-
-
-
-
 
 
 # ---------- Windows "Run on login" registry helper ----------

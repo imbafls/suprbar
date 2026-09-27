@@ -228,17 +228,10 @@ class UiSmokeTest(unittest.TestCase):
                 # The schema-driven settings render the new sections too.
                 page.click("#settingsBtn")
                 self._wait_text(page, "#settingsSections", "Show mini overlay")
-                self.assertIn(
-                    "Per-project daily caps",
-                    page.text_content("#settingsSections"))
-                # Density pref (restored in v0.15.5) applies as a body class.
-                self.assertIn("compact",
-                              page.get_attribute("body", "class") or "")
-                # ...and the trimmed settings stay trimmed.
+                # Only the v5 settings exist (the page is rewritten in T8).
                 settings_text = page.text_content("#settingsSections")
-                self.assertIn("Density", settings_text)
-                self.assertNotIn("Width (px)", settings_text)
-                self.assertNotIn("Auto-hide delay", settings_text)
+                self.assertNotIn("Per-project daily caps", settings_text)
+                self.assertNotIn("Density", settings_text)
                 self.assertEqual(errors, [])
             finally:
                 browser.close()
