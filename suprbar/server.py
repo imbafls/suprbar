@@ -302,6 +302,20 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return {}
 
+    def _drain_body(self) -> None:
+        """Consume an unread request body before an early error reply.
+
+        Answering (and closing) while the client is still sending lets
+        Windows reset the connection, so the client sees an abort instead
+        of the 403/404.
+        """
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if 0 < length <= 1 << 20:
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
+
     def _origin_allowed(self) -> bool:
         """CSRF guard for state-changing POSTs.
 
@@ -399,6 +413,7 @@ class Handler(BaseHTTPRequestHandler):
         # CSRF: reject browser cross-origin POSTs before any mutating route runs.
         # Matters most for /api/update/apply (download+install+quit) and /api/quit.
         if not self._origin_allowed():
+            self._drain_body()
             return self._send_error(403, "forbidden", "cross-origin request rejected")
 
         if path == "/api/settings":
@@ -457,6 +472,7 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=_trigger_quit, daemon=True).start()
             return
 
+        self._drain_body()
         return self._send_error(404, "not_found", f"no route {path}")
 
 

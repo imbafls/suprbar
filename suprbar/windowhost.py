@@ -32,6 +32,8 @@ log = logging.getLogger("suprbar.windowhost")
 # WebView2 teardown has been seen to hang; a child must never outlive its
 # window by more than this.
 _EXIT_WATCHDOG_SECONDS = 3.0
+# How long an exit waits for a still-loading page (see exit_now).
+_LOAD_BEFORE_EXIT_SECONDS = 3.0
 
 
 def _data_dir() -> Path:
@@ -122,7 +124,14 @@ def run(kind: str, url: str) -> int:
         log.error("unknown window kind %r", kind)
         return 2
 
+    # Destroying a window whose WebView2 is still initializing aborts that
+    # initialization and pywebview logs it as an ERROR (toggling the overlay
+    # on and straight off did this). Let the page finish loading first.
+    loaded = threading.Event()
+    window.events.loaded += loaded.set
+
     def exit_now() -> None:
+        loaded.wait(_LOAD_BEFORE_EXIT_SECONDS)
         t = threading.Timer(_EXIT_WATCHDOG_SECONDS, lambda: os._exit(0))
         t.daemon = True
         t.start()
