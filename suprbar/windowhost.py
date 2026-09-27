@@ -74,6 +74,8 @@ def _std_stream(which: int) -> BinaryIO:
     s = sys.stdin if which == 0 else sys.stdout
     if s is not None and hasattr(s, "buffer"):
         return s.buffer
+    if sys.platform != "win32":
+        raise RuntimeError("window child started without stdio pipes")
     import msvcrt
     get_std = ctypes.windll.kernel32.GetStdHandle
     get_std.restype = ctypes.c_void_p
