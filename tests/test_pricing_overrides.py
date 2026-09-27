@@ -1,4 +1,4 @@
-"""Pricing overrides + incremental scanner tail + per-project budget tests."""
+"""Pricing overrides + incremental scanner tail tests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from suprbar import config, pricing, scanner
+from suprbar import pricing, scanner
 
 
 def _usage_record(ts: datetime, session: str = "s1",
@@ -67,20 +67,6 @@ class PricingOverrideTest(unittest.TestCase):
             self.assertEqual(len(pricing.GENERIC_MODEL_RATES), base + 1)
             self.assertEqual(
                 pricing.generic_rate_for("zzgen-dup")["input"], 0.5)
-
-
-class ProjectLimitParseTest(unittest.TestCase):
-    def test_parses_valid_entries_and_skips_bad_ones(self):
-        raw = ["discord=50", "tracker:12.5", "  spaced = 3 ",
-               "no-amount", "bad=abc", "zero=0", ""]
-        with mock.patch("suprbar.config.get_pref", return_value=raw):
-            got = config.project_limit_map()
-        self.assertEqual(got, {"discord": 50.0, "tracker": 12.5,
-                               "spaced": 3.0})
-
-    def test_non_list_is_empty(self):
-        with mock.patch("suprbar.config.get_pref", return_value="nope"):
-            self.assertEqual(config.project_limit_map(), {})
 
 
 class ScannerTailTest(unittest.TestCase):
@@ -165,36 +151,6 @@ class ScannerTailTest(unittest.TestCase):
             res3, _off3 = scanner._scan_one_file(
                 p, midnight, start_offset=off2, base=res2)
             self.assertEqual(res3["sess_msgs_today"], 2)
-
-
-class ProjectBudgetTest(unittest.TestCase):
-    def setUp(self):
-        scanner._file_cache.clear()
-        scanner._cache_date = None
-
-    def test_project_limits_get_their_own_window(self):
-        now = datetime.now(UTC)
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            for proj, tokens in (("alpha", 1_000_000), ("beta", 2_000_000)):
-                d = root / proj
-                d.mkdir()
-                (d / "s.jsonl").write_text(
-                    _usage_record(now, session=proj, inp=tokens) + "\n",
-                    encoding="utf-8")
-            with mock.patch.object(scanner, "CLAUDE_HOME", root):
-                s = scanner.budgets_summary(
-                    0.0, 0.0, 0.0,
-                    project_limits={"alpha": 1.0, "beta": 100.0},
-                )
-        # sonnet: $3/M input
-        self.assertAlmostEqual(s["project:alpha"]["spent"], 3.0)
-        self.assertTrue(s["project:alpha"]["over"])
-        self.assertAlmostEqual(s["project:beta"]["spent"], 6.0)
-        self.assertFalse(s["project:beta"]["over"])
-        self.assertEqual(s["project:beta"]["project"], "beta")
-        # global windows still exist even with no global limits
-        self.assertEqual(s["daily"]["limit"], 0.0)
 
 
 class HostedTableSyncTest(unittest.TestCase):

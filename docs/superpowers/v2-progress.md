@@ -16,7 +16,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] Write `docs/superpowers/plans/2026-09-27-suprbar-v2.md` (ordered small tasks + verification) and append its tasks to section 3 below — 13 tasks, each with its own check + the pytest/ruff/mypy×2 gate
 
 ## 3. Implement
-- [ ] T1 Remove budgets
+- [x] T1 Remove budgets — scanner.budgets_summary, /api/budgets, tray tint+alerts, report budget card, config.project_limit_map and 3 tests deleted; grep clean outside config schema; report payload builds; gate green (20 passed, ruff, mypy×2)
 - [ ] T2 Remove project filters, anonymize, top-N
 - [ ] T3 Fixed flyout placement, no click-through
 - [ ] T4 Fixed internals (pricing URL, log level, live threshold, range prefs, cache TTL)

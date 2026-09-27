@@ -124,18 +124,6 @@ def _range_fixture() -> dict:
     }
 
 
-def _budgets_fixture() -> dict:
-    return {
-        "daily": {"spent": 18.74, "limit": 25.0, "pct": 74.96, "over": False,
-                  "remaining": 6.26, "alerting": False},
-        "weekly": {"spent": 214.06, "limit": 0.0, "pct": 0.0, "over": False,
-                   "remaining": 0.0, "alerting": False},
-        "monthly": {"spent": 612.30, "limit": 750.0, "pct": 81.64,
-                    "over": False, "remaining": 137.70, "alerting": True},
-        "alert_pct": 80,
-    }
-
-
 def _prefs_fixture() -> dict:
     return {"prefs": {
         "schema_version": 4,
@@ -176,8 +164,6 @@ class UiSmokeTest(unittest.TestCase):
             mock.patch.object(server, "today_cached", side_effect=_fixture),
             mock.patch.object(server, "range_cached",
                               side_effect=lambda *a, **k: _range_fixture()),
-            mock.patch.object(server, "_budgets_payload",
-                              side_effect=_budgets_fixture),
             mock.patch.object(server, "_prefs_payload",
                               side_effect=_prefs_fixture),
         ]

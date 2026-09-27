@@ -676,37 +676,6 @@ def pricing_remote_url() -> str:
     return v if isinstance(v, str) else ""
 
 
-def project_limit_map() -> dict[str, float]:
-    """Parse budgets.project_limits entries into {project: daily_limit}.
-
-    Accepted forms: ``"project=25"`` or ``"project:25"``. Malformed or
-    non-positive entries are ignored (logged), never fatal.
-    """
-    raw = get_pref("budgets.project_limits", [])
-    if not isinstance(raw, list):
-        return {}
-    out: dict[str, float] = {}
-    for entry in raw:
-        s = str(entry).strip()
-        if not s:
-            continue
-        name, sep, amount = s.partition("=")
-        if not sep:
-            name, sep, amount = s.partition(":")
-        name = name.strip()
-        if not name or not sep:
-            log.warning("ignoring project limit %r (want name=amount)", s)
-            continue
-        try:
-            limit = float(amount.strip())
-        except (TypeError, ValueError):
-            log.warning("ignoring project limit %r (bad amount)", s)
-            continue
-        if limit > 0:
-            out[name] = limit
-    return out
-
-
 # ---------- Windows "Run on login" registry helper ----------
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"

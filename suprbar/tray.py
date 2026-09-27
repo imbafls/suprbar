@@ -31,16 +31,10 @@ PULSE_MS = 300
 
 # ---------- Icon drawing ----------
 
-def _gradient_image(size: int, palette: str = "default") -> Image.Image:
-    """Diagonal gradient. Palette accents vary: default = indigo (matches the
-    redesign accent, 135° #5b8fe8 → #7a6cf0), warn = amber, danger = red."""
+def _gradient_image(size: int) -> Image.Image:
+    """Diagonal indigo gradient (the redesign accent, 135° #5b8fe8 → #7a6cf0)."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    if palette == "warn":
-        a, v = (242, 181, 58), (214, 150, 40)    # amber (#f2b53a)
-    elif palette == "danger":
-        a, v = (232, 81, 63), (198, 58, 44)      # red (#e8513f)
-    else:
-        a, v = (91, 143, 232), (122, 108, 240)   # indigo (#5b8fe8 → #7a6cf0)
+    a, v = (91, 143, 232), (122, 108, 240)
     px = img.load()
     assert px is not None  # Pillow stubs type load() Optional; it never is
     denom = 2 * (size - 1) if size > 1 else 1
@@ -128,13 +122,11 @@ def _brighten(img: Image.Image, factor: float = 1.18) -> Image.Image:
     return img
 
 
-def _render(live: bool = False, brighter: bool = False,
-            palette: str = "default") -> Image.Image:
-    """Render a tray icon (256→64 px LANCZOS) with optional live + bright +
-    color palette (default / warn / danger for budget alerts)."""
+def _render(live: bool = False, brighter: bool = False) -> Image.Image:
+    """Render a tray icon (256→64 px LANCZOS), optionally live + brighter."""
     big_size = 256
     target_size = 64
-    bg = _gradient_image(big_size, palette=palette)
+    bg = _gradient_image(big_size)
     bg = _draw_S(bg)
     if live:
         bg = _add_live_dot(bg)
@@ -226,15 +218,6 @@ class TrayApp:
         self._idle_bright = _render(live=False, brighter=True)
         self._live_bright = _render(live=True, brighter=True)
         self._pulse_timer: threading.Timer | None = None
-        self._last_icon_key: tuple = (False, "default")
-        # (live, palette) -> rendered icon; each render is a 256px per-pixel
-        # Python loop, so budget-colour flips reuse earlier renders.
-        self._icon_cache: dict[tuple[bool, str], Image.Image] = {
-            (False, "default"): self._idle_icon,
-            (True, "default"): self._live_icon,
-        }
-        # window key -> last notified state ("ok" / "warn" / "over")
-        self._budget_alerts: dict[str, str] = {}
 
     # ---- click / menu callbacks ----
 
@@ -442,108 +425,15 @@ class TrayApp:
         self._pulse_timer.daemon = True
         self._pulse_timer.start()
 
-    def _apply_live_state(self, data: dict, budgets: dict | None = None) -> None:
-        """Swap the tray icon based on (live, budget_alert).
-
-        The icon picks a palette: default for normal, warn (amber) when any
-        budget is approaching its limit, danger (red) when over. The choice
-        is only honored if the user enabled budget-aware tinting.
-        """
+    def _apply_live_state(self, data: dict) -> None:
+        """Swap to the green-dot icon while a session is live."""
         live = bool(data.get("active"))
-        palette = "default"
-        try:
-            if config.get_pref("budgets.tray_warn_color", True):
-                if budgets is None:
-                    budgets = self._latest_budgets()
-                if budgets:
-                    over = any(b.get("over") for b in budgets.values()
-                               if isinstance(b, dict))
-                    alert = any(b.get("alerting") for b in budgets.values()
-                                if isinstance(b, dict))
-                    if over:
-                        palette = "danger"
-                    elif alert:
-                        palette = "warn"
-        except Exception:
-            pass
-        key = (live, palette)
-        if (key != self._last_icon_key) and self._icon:
+        if live != self._last_live and self._icon:
             try:
-                img = self._icon_cache.get(key)
-                if img is None:
-                    img = self._icon_cache[key] = _render(live=live,
-                                                          palette=palette)
-                self._icon.icon = img
+                self._icon.icon = self._live_icon if live else self._idle_icon
             except Exception:
                 pass
         self._last_live = live
-        self._last_icon_key = key
-
-    def _notify_budget_crossings(self, budgets: dict | None) -> None:
-        """Native notification when a budget first crosses a threshold.
-
-        Fires from the tray loop (works with the flyout closed), once per
-        state change per window. ``budgets.notify`` gates it.
-        """
-        if not budgets or not self._icon:
-            return
-        try:
-            if not config.get_pref("budgets.notify", True):
-                return
-        except Exception:
-            return
-        labels = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
-        for key, b in budgets.items():
-            if not isinstance(b, dict) or b.get("limit", 0) <= 0:
-                continue
-            state = "over" if b.get("over") else (
-                "warn" if b.get("alerting") else "ok")
-            prev = self._budget_alerts.get(key)
-            self._budget_alerts[key] = state
-            if state == prev or state == "ok":
-                continue
-            label = labels.get(key, f"{b.get('project', key)} (project)")
-            spent, limit = float(b.get("spent", 0)), float(b.get("limit", 0))
-            if state == "over":
-                body = (f"{label} budget exceeded — "
-                        f"${spent:,.2f} / ${limit:,.2f}")
-            else:
-                body = (f"{label} budget at {b.get('pct', 0):.0f}% — "
-                        f"${spent:,.2f} / ${limit:,.2f}")
-            try:
-                self._icon.notify(body, "supr.bar — budget")
-            except Exception:
-                pass
-
-    def _latest_budgets(self) -> dict | None:
-        """Compute current budget windows once per tooltip refresh.
-
-        Uses the scanner directly to avoid an HTTP loop back to ourselves.
-        Includes per-project daily caps (``budgets.project_limits``).
-        """
-        try:
-            from . import scanner as _scn
-            cfg = config.load()
-            b = cfg.get("budgets", {}) or {}
-            d = float(b.get("daily_limit",   0.0) or 0.0)
-            w = float(b.get("weekly_limit",  0.0) or 0.0)
-            m = float(b.get("monthly_limit", 0.0) or 0.0)
-            project_limits = config.project_limit_map()
-            if not (d or w or m or project_limits):
-                return None
-            week_starts = cfg.get("range", {}).get("week_starts_on", "mon")
-            alert_pct = int(b.get("alert_at_pct", 80) or 80)
-            s = _scn.budgets_summary(d, w, m, week_starts_on=week_starts,
-                                     allowlist=config.project_allowlist(),
-                                     denylist=config.project_denylist(),
-                                     project_limits=project_limits)
-            for entry in s.values():
-                if isinstance(entry, dict):
-                    entry["alerting"] = entry.get("limit", 0) > 0 \
-                        and entry.get("pct", 0) >= alert_pct
-            return s
-        except Exception:
-            return None
 
     def _sync_mini(self) -> None:
         """Keep overlay visibility in step with the persisted pref."""
@@ -555,9 +445,7 @@ class TrayApp:
     def _update_tooltip(self):
         try:
             data = server.today_cached()
-            budgets = self._latest_budgets()
-            self._apply_live_state(data, budgets)
-            self._notify_budget_crossings(budgets)
+            self._apply_live_state(data)
             self._sync_mini()
             if self._icon:
                 self._icon.title = _format_tooltip(data)

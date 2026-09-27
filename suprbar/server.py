@@ -6,7 +6,6 @@ Routes:
   GET  /api/ping                    liveness (used for single-instance check)
   GET  /api/today[?refresh=1]       aggregated today summary (all sources)
   GET  /api/range?key=…             usage for a time-range tab
-  GET  /api/budgets                 spent-vs-limit for day/week/month
   GET  /api/config                  current config (key fingerprint only)
   POST /api/config                  update config (JSON body)
   POST /api/config/test-key         test admin key (JSON body: {"key": "..."})
@@ -45,7 +44,6 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from typing import Any
 
 from . import __version__, aggregator, config, report, scanner, updater
 from .providers import anthropic_api as p_anthropic_api
@@ -440,12 +438,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(200, _range_payload(qs))
             except Exception as e:
                 return self._send_error(500, "range_failed", str(e))
-
-        if path == "/api/budgets":
-            try:
-                return self._send_json(200, _budgets_payload())
-            except Exception as e:
-                return self._send_error(500, "budgets_failed", str(e))
 
         if path == "/api/prefs":
             # Return the full mutable preference tree (excluding secrets).
@@ -851,41 +843,6 @@ def _range_payload(qs: dict) -> dict:
         # (range_cached re-computes when entry is missing).
         _range_cache.clear()
     return range_cached(key, cs, ce)
-
-
-def _budgets_payload() -> dict:
-    """Build a /api/budgets response using user budget prefs."""
-    cfg = config.load()
-    b = cfg.get("budgets", {}) or {}
-    daily   = float(b.get("daily_limit",   0.0) or 0.0)
-    weekly  = float(b.get("weekly_limit",  0.0) or 0.0)
-    monthly = float(b.get("monthly_limit", 0.0) or 0.0)
-    alert_pct = int(b.get("alert_at_pct", 80) or 80)
-    project_limits = config.project_limit_map()
-    if not (daily or weekly or monthly or project_limits):
-        # No limits configured — skip the three range scans entirely. The
-        # flyout polls this every 30s; scanning ~1.2k JSONL files for a
-        # feature that's off was pure waste.
-        def _zero() -> dict[str, Any]:
-            return {"spent": 0.0, "limit": 0.0, "pct": 0.0,
-                    "over": False, "remaining": 0.0, "alerting": False}
-        return {"daily": _zero(), "weekly": _zero(), "monthly": _zero(),
-                "alert_pct": alert_pct}
-    week_starts = cfg.get("range", {}).get("week_starts_on", "mon")
-    s = scanner.budgets_summary(
-        daily, weekly, monthly,
-        week_starts_on=week_starts,
-        allowlist=config.project_allowlist(),
-        denylist=config.project_denylist(),
-        project_limits=project_limits,
-    )
-    # add alert flags (global windows + per-project entries)
-    for entry in s.values():
-        if isinstance(entry, dict):
-            entry["alerting"] = entry.get("limit", 0) > 0 \
-                and entry.get("pct", 0) >= alert_pct
-    s["alert_pct"] = alert_pct
-    return s
 
 
 def _prefs_payload() -> dict:

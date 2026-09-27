@@ -4,7 +4,6 @@ Main entry points:
   * today_summary()     — today-only state for the tray flyout: active session,
                           today's cost, token mix, messages, model, started
   * range_summary(key)  — usage aggregated over a user-selected time window
-  * budgets_summary()   — spent-vs-limit for day / week / month
 
 Performance notes:
   * Files are parsed in a small thread pool (I/O-bound, not CPU-bound).
@@ -1375,54 +1374,3 @@ def _empty_range(label: str, start: datetime, end: datetime, started: float) -> 
         "files_scanned": 0, "parse_errors": 0,
         "scan_ms": int((time.time() - started) * 1000),
     }
-
-
-# ---------- budgets ----------
-
-def budgets_summary(daily_limit: float, weekly_limit: float, monthly_limit: float,
-                    week_starts_on: str = "mon",
-                    allowlist: list[str] | None = None,
-                    denylist:  list[str] | None = None,
-                    project_limits: dict[str, float] | None = None,
-                    ) -> dict[str, Any]:
-    """Return spent vs limit for day/week/month windows.
-
-    Useful for budget alerts. Reuses range_summary so all filters apply.
-    ``project_limits`` adds per-project daily windows keyed
-    ``"project:<name>"`` — one runaway repo shouldn't be invisible just
-    because the global cap isn't hit yet.
-    """
-    today = range_summary("today",
-                          allowlist=allowlist, denylist=denylist)
-    week  = range_summary("week", week_starts_on=week_starts_on,
-                          allowlist=allowlist, denylist=denylist)
-    month = range_summary("month",
-                          allowlist=allowlist, denylist=denylist)
-
-    def b(spent: float, limit: float) -> dict[str, Any]:
-        if limit <= 0:
-            return {"spent": round(spent, 4), "limit": 0.0,
-                    "pct": 0.0, "over": False, "remaining": 0.0}
-        pct = (spent / limit) * 100
-        return {
-            "spent": round(spent, 4),
-            "limit": round(limit, 4),
-            "pct": round(pct, 2),
-            "over": spent >= limit,
-            "remaining": round(max(0.0, limit - spent), 4),
-        }
-
-    out: dict[str, Any] = {
-        "daily":   b(today["totals"]["cost"], daily_limit),
-        "weekly":  b(week["totals"]["cost"],  weekly_limit),
-        "monthly": b(month["totals"]["cost"], monthly_limit),
-    }
-    if project_limits:
-        spent_by_project = {
-            p["project"]: float(p["cost"]) for p in today["by_project"]
-        }
-        for name, limit in project_limits.items():
-            entry = b(spent_by_project.get(name, 0.0), float(limit))
-            entry["project"] = name
-            out[f"project:{name}"] = entry
-    return out

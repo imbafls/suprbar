@@ -229,18 +229,7 @@ body{
 .brow .meta{ grid-column:1; font-family:var(--b-mono); font-size:10.5px; color:var(--b-dimmer); }
 .brow .pct{ grid-column:2; font-family:var(--b-mono); font-size:10.5px; color:var(--b-dim); text-align:right; }
 
-/* ====================  BUDGET  ========================================= */
-.budget-card{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:22px 24px; display:flex; flex-direction:column; gap:14px; }
-.bc-top{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
-.bc-amt{ font-family:var(--b-mono); font-size:30px; font-weight:650; letter-spacing:-.02em; }
-.bc-amt .lim{ color:var(--b-dimmer); font-weight:500; font-size:.62em; }
-.bc-pct{ font-family:var(--b-mono); font-size:13px; font-weight:600; color:var(--b-warn); }
-.bc-track{ height:10px; border-radius:var(--r-pill); background:var(--b-surface-3); overflow:hidden; }
-.bc-fill{ height:100%; border-radius:var(--r-pill); background:linear-gradient(90deg,var(--b-warn),color-mix(in oklab,var(--b-warn) 70%,white)); }
-.bc-fill.nocap{ background:var(--b-accent); }
-.bc-sub{ display:flex; gap:20px; flex-wrap:wrap; font-family:var(--b-mono); font-size:12px; color:var(--b-dim); }
-.bc-sub b{ color:var(--b-text); }
-.bc-sub .ok{ color:var(--b-success); }
+
 
 /* ====================  TOKENS  ========================================= */
 .tok-card{ background:var(--b-surface); border:1px solid var(--b-line); border-radius:var(--r-3); padding:20px 22px; }
@@ -293,7 +282,7 @@ body{
   .toolbar{ display:none !important; }
   body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .sheet{ max-width:none; padding:0; }
-  .section,.hero,.chart-card,.panel,.budget-card,.tok-card,.ins,.report-head{ break-inside:avoid; }
+  .section,.hero,.chart-card,.panel,.tok-card,.ins,.report-head{ break-inside:avoid; }
   .chart{ height:200px; }
 }
 </style>
@@ -378,19 +367,6 @@ body{
           <span class="li"><span class="sw peak"></span>Peak day</span>
           <span class="li" style="margin-left:auto">Daily avg <b id="legAvg"></b> · Peak <b id="legPeak"></b></span>
         </div>
-      </div>
-    </section>
-
-    <!-- budget -->
-    <section class="section">
-      <div class="sec-head"><div class="sec-ttl">Monthly budget</div><div class="sec-note" id="budgetNote"></div></div>
-      <div class="budget-card">
-        <div class="bc-top">
-          <div class="bc-amt" id="bcAmt"></div>
-          <div class="bc-pct" id="bcPct"></div>
-        </div>
-        <div class="bc-track"><div class="bc-fill" id="bcFill"></div></div>
-        <div class="bc-sub" id="bcSub"></div>
       </div>
     </section>
 
@@ -544,26 +520,6 @@ line.innerHTML = '<span class="lbl">avg</span>';
 $("#chart").appendChild(line);
 // x-axis: label roughly every 4th day
 $("#chartAxis").innerHTML = REPORT.byDay.map((d,i)=> '<div class="ax">'+((i%4===0)?d[0]:"")+'</div>').join("");
-
-/* ---------- budget ---------- */
-const b=REPORT.budget;
-if(b.limit>0){
-  const bpct=b.spent/b.limit*100, remain=b.limit-b.spent;
-  $("#budgetNote").textContent = "cap "+money(b.limit)+" · alert at "+b.alertPct+"%";
-  $("#bcAmt").innerHTML = money(b.spent)+' <span class="lim">/ '+money0(b.limit)+'</span>';
-  $("#bcPct").textContent = bpct.toFixed(1)+"% used";
-  $("#bcFill").style.width = bpct.toFixed(1)+"%";
-  $("#bcSub").innerHTML = '<span><b>'+money(remain)+'</b> remaining</span>'+
-    '<span class="ok">under cap with '+(100-bpct).toFixed(0)+'% to spare</span>'+
-    '<span>projected close: <b>'+money(activeDays>0?b.spent/activeDays*REPORT.byDay.length:b.spent)+'</b> at this pace</span>';
-}else{
-  $("#budgetNote").textContent = "no budget configured";
-  $("#bcAmt").innerHTML = money(b.spent);
-  $("#bcPct").textContent = "";
-  $("#bcFill").classList.add("nocap");
-  $("#bcFill").style.width = "0%";
-  $("#bcSub").innerHTML = '<span><b>'+money(b.spent)+'</b> spent · no cap set</span>';
-}
 
 /* ---------- by model ---------- */
 const maxModel = Math.max(...REPORT.byModel.map(m=>m.cost));

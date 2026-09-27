@@ -3,7 +3,7 @@
 ``build_report()`` returns a single JSON-serializable dict describing the last
 30 days of local Claude Code usage: a per-day cost series, headline totals
 (sessions / projects / cache savings / prior-month comparison), the active
-budget, and breakdowns by source / model / project plus a token mix.
+breakdowns by source / model / project plus a token mix.
 
 v1 is local-only and honest about it — the detailed source/model/project
 breakdowns come from ``~/.claude`` data, so exactly one "source card" is
@@ -56,20 +56,6 @@ def _parse_day(date_iso: str) -> datetime | None:
         return datetime.fromisoformat(date_iso)
     except (ValueError, TypeError):
         return None
-
-
-def _monthly_limit() -> float:
-    try:
-        return float(config.get_pref("budgets.monthly_limit", 0.0) or 0.0)
-    except Exception:
-        return 0.0
-
-
-def _alert_pct() -> int:
-    try:
-        return int(config.get_pref("budgets.alert_at_pct", 80) or 80)
-    except Exception:
-        return 80
 
 
 def _week_starts_on() -> str:
@@ -353,11 +339,6 @@ def build_report() -> dict[str, Any]:
             "cacheHitRatio": round(float(totals.get("cache_hit_ratio", 0.0) or 0.0), 4),
             "prevMonthCost": round(prev_cost, 2),
             "peakDayName": peak_name,
-        },
-        "budget": {
-            "spent": total_cost,
-            "limit": round(_monthly_limit(), 2),
-            "alertPct": _alert_pct(),
         },
         "bySource": by_source,
         "byModel": _build_by_model(by_model),
