@@ -2,399 +2,87 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>supr.bar</title>
-  <!-- Fully offline: system font stack (Segoe UI on Windows) — no remote fonts. -->
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body class="loading">
-  <div id="root">
-    <div class="flyout" id="flyout">
+<body>
+  <main class="fly" id="fly">
+    <header class="head">
+      <span class="brand">supr<b>.</b>bar</span>
+      <span class="pill" id="status" data-state="idle"><i></i><span id="statusText">idle</span></span>
+      <span class="grow"></span>
+      <button class="ibtn" id="refreshBtn" title="Refresh" aria-label="Refresh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
+      </button>
+      <button class="ibtn" id="pinBtn" title="Keep open" aria-label="Keep open" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"/><path d="M12 15v5"/></svg>
+      </button>
+      <button class="ibtn" id="settingsBtn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12.5a7 7 0 0 0 .1-1l1.5-1.2-1.5-2.6-1.9.5a7 7 0 0 0-1.6-1L15 4h-3l-.3 2.2a7 7 0 0 0-1.6 1l-1.9-.5L6.7 9.3 8.2 10.5a7 7 0 0 0 0 1.9L6.7 13.6l1.5 2.6 1.9-.5a7 7 0 0 0 1.6 1L12 19h3l.3-2.2a7 7 0 0 0 1.6-1l1.9.5 1.5-2.6-1.5-1.2z"/></svg>
+      </button>
+    </header>
 
-      <!-- header / drag handle -->
-      <header class="b-head" id="dragHandle" data-tip="Drag to move">
-        <span class="b-mark">S</span>
-        <span class="b-title">supr<span class="dot">.</span>bar</span>
-        <span class="b-badge" id="headerVersion">v0.8</span>
-        <span class="b-badge dev" id="devBadge" hidden>dev</span>
-        <span class="spacer"></span>
-        <div class="b-icons">
-          <button class="ibtn" id="helpBtn" aria-label="Keyboard shortcuts" data-tip="Shortcuts (?)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><circle cx="12" cy="17.5" r=".6" fill="currentColor"/></svg>
-          </button>
-          <button class="ibtn" id="refreshBtn" aria-label="Refresh data" data-tip="Refresh (F5)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
-          </button>
-          <button class="ibtn" id="pinBtn" aria-pressed="false" aria-label="Pin popup (don't auto-hide)" data-tip="Pin (don't auto-hide)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"/><path d="M12 15v5"/></svg>
-          </button>
-          <button class="ibtn" id="settingsBtn" aria-label="Open settings" data-tip="Settings (Ctrl+,)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12.5a7 7 0 0 0 .1-1l1.5-1.2-1.5-2.6-1.9.5a7 7 0 0 0-1.6-1L15 4h-3l-.3 2.2a7 7 0 0 0-1.6 1l-1.9-.5L6.7 9.3 8.2 10.5a7 7 0 0 0 0 1.9L6.7 13.6l1.5 2.6 1.9-.5a7 7 0 0 0 1.6 1L12 19h3l.3-2.2a7 7 0 0 0 1.6-1l1.9.5 1.5-2.6-1.5-1.2z"/></svg>
-          </button>
-        </div>
-      </header>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button role="tab" data-range="today" aria-selected="true">Today</button>
+      <button role="tab" data-range="7d">7d</button>
+      <button role="tab" data-range="30d">30d</button>
+      <button role="tab" data-range="90d">90d</button>
+    </nav>
 
-      <!-- range tabs -->
-      <div class="b-tabs range-tabs" id="rangeTabs" role="tablist" aria-label="Time range">
-        <button class="rt active" role="tab" aria-selected="true"  data-range="today" data-tip="Today">Today</button>
-        <button class="rt" role="tab" aria-selected="false" data-range="24h"   data-tip="Rolling 24 hours">24h</button>
-        <button class="rt" role="tab" aria-selected="false" data-range="7d"    data-tip="Last 7 days">7d</button>
-        <button class="rt" role="tab" aria-selected="false" data-range="week"  data-tip="This calendar week">Wk</button>
-        <button class="rt" role="tab" aria-selected="false" data-range="month" data-tip="This calendar month">Mo</button>
-        <button class="rt" role="tab" aria-selected="false" data-range="30d"   data-tip="Last 30 days">30d</button>
-        <button class="rt" role="tab" aria-selected="false" data-range="90d"   data-tip="Last 90 days">90d</button>
-      </div>
+    <section class="hero">
+      <div class="cost num" id="cost">$—</div>
+      <div class="sub" id="sub">loading…</div>
+      <div class="burn num" id="burn" hidden></div>
+    </section>
 
-      <!-- offline / connection banner -->
-      <div class="conn" id="connBanner" hidden role="alert">
-        <span class="cpip"></span>
-        <span class="ctext" id="connBannerText">Offline — retrying…</span>
-        <button class="cretry" type="button" id="connRetryBtn">Retry</button>
-      </div>
+    <div class="sources" id="sources"></div>
+    <div class="bars" id="bars" aria-hidden="true"></div>
 
-      <!-- update-available banner (accent-toned, in the .conn flex-none slot) -->
-      <div class="updbar" id="updateBanner" hidden role="status">
-        <span class="upip"></span>
-        <span class="utext" id="updateBannerText">Update available — <b id="updateVersion">v?</b></span>
-        <button class="ubtn primary" type="button" id="updateApplyBtn">Update</button>
-        <button class="ubtn ghost" type="button" id="updateDismissBtn" aria-label="Dismiss">×</button>
-      </div>
+    <section class="lists">
+      <div><h3>Projects</h3><ol id="projects"></ol></div>
+      <div><h3>Models</h3><ol id="models"></ol></div>
+    </section>
 
-      <div class="flyout-body" id="flyoutBody">
+    <footer class="foot">
+      <span id="updated">—</span>
+      <span class="grow"></span>
+      <button class="tbtn accent" id="updateBtn" hidden></button>
+      <button class="tbtn" id="reportBtn">Report</button>
+    </footer>
+  </main>
 
-        <!-- ── glance: cost hero ── -->
-        <div class="cost-block" id="costBlock">
-          <div class="cost-eyebrow" id="costLabel">Today · Claude Code</div>
-          <div class="cost-num" id="costNum" aria-live="polite" aria-atomic="true">
-            <span class="cur">$</span><span class="cu-whole" id="costWhole">0</span><span class="cents cu-cents" id="costCents">.00</span>
-          </div>
-          <div class="live-row">
-            <span class="live-ind" id="liveIndicator"><span class="pip"></span> <span id="liveCount">0</span> live</span>
-            <span class="hero-signal" id="iProjected"></span>
-            <span class="source-line" id="sourceLine" hidden></span>
-          </div>
-          <div class="model-chips" id="modelChips" hidden aria-label="Top models by cost"></div>
-        </div>
-
-        <!-- ── glance: budget ring gauge ── -->
-        <div class="fuel" id="budgetStrip" hidden>
-          <svg class="fuel-ring" viewBox="0 0 40 40" role="img" aria-label="Budget usage">
-            <circle class="fr-bg" cx="20" cy="20" r="16"/>
-            <circle class="fr-val" id="frArc" cx="20" cy="20" r="16" pathLength="100"/>
-          </svg>
-          <div class="fuel-txt">
-            <div class="fuel-top">
-              <span class="lbl">Daily budget</span>
-              <span class="amt" id="bsAmt">$0 <span class="lim">/ $0</span></span>
-            </div>
-            <div class="fuel-sub">
-              <span id="bsRemain"></span>
-              <span class="sep" id="bsSep">·</span>
-              <span id="bsPct" hidden>—</span>
-              <span class="over" id="bsPace"></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── glance: daily spend trend (range views) ── -->
-        <div class="trend" id="trendBlock" hidden>
-          <div class="trend-head">
-            <span class="ttl">Daily spend</span>
-            <span class="trend-max" id="trendMax"></span>
-          </div>
-          <div class="trend-bars" id="trendBars" aria-label="Daily spend chart"></div>
-        </div>
-
-        <!-- ── glance: now burning (the live session actually spending) ── -->
-        <div class="nowcard" id="liveSessions" hidden>
-          <div class="nc-head">
-            <span class="nc-tag"><span class="pip"></span>Now burning</span>
-            <span class="nc-ago" id="ncAgo"></span>
-          </div>
-          <div class="nc-main">
-            <span class="nc-proj" id="ncProj">—</span>
-            <span class="nc-cost" id="ncCost">$0.00</span>
-          </div>
-          <div class="nc-sub">
-            <span class="nc-meta" id="ncMeta"></span>
-            <span class="nc-burn" id="ncBurn"></span>
-          </div>
-        </div>
-
-        <!-- ── glance: two key chips ── -->
-        <div class="keychips impact" id="impactStrip" aria-label="Usage insights">
-          <div class="chip"><span class="k">Avg / msg</span><span class="v" id="iAvgMsg">—</span></div>
-          <div class="chip"><span class="k">Cache saved</span><span class="v good" id="iSaved">—</span></div>
-        </div>
-
-        <!-- ── idle empty state ── -->
-        <div class="empty" id="emptyState" role="status" hidden>
-          <div class="glyph">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
-          </div>
-          <div class="e-ttl">No sessions running</div>
-          <div class="e-sub" id="emptySub">watching your AI sessions</div>
-        </div>
-
-        <!-- ── Details: everything secondary folds here ── -->
-        <details class="more" id="detailsFold">
-          <summary>
-            <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
-            Details<span class="more-meta">token mix · hourly · projects</span>
-          </summary>
-          <div class="more-body">
-
-            <!-- scan status pills -->
-            <div class="status-strip status" id="statusStrip" aria-label="Scan status"></div>
-
-            <!-- token mix -->
-            <div class="tokens">
-              <div class="tok-head"><span class="ttl">Token mix</span><span class="cache-hit" id="cacheHit" data-tip="Cache hit ratio"></span></div>
-              <div class="tok-bar">
-                <span class="tb-in"    id="tbIn"    style="width:0%"></span>
-                <span class="tb-out"   id="tbOut"   style="width:0%"></span>
-                <span class="tb-cache" id="tbCache" style="width:0%"></span>
-              </div>
-              <div class="tok-legend">
-                <span class="li"><span class="sw in"></span>in <b id="legIn">0</b></span>
-                <span class="li"><span class="sw out"></span>out <b id="legOut">0</b></span>
-                <span class="li"><span class="sw cache"></span>cache <b id="legCache">0</b></span>
-              </div>
-            </div>
-
-            <!-- per-model cost breakdown (all sources) -->
-            <div class="models" id="byModelBlock" hidden>
-              <div class="tok-head">
-                <span class="ttl">By model</span>
-                <span class="cache-hit" id="modelCount"></span>
-              </div>
-              <ol class="model-rows" id="modelRows"></ol>
-            </div>
-
-            <!-- hourly sparkline -->
-            <div class="spark">
-              <div class="spark-head">Spend by hour</div>
-              <div class="hourly-spark" id="hourlySpark" aria-label="Hourly spend sparkline"></div>
-            </div>
-
-            <!-- metric grid -->
-            <div class="metrics" id="metricRow">
-              <div class="mtile"><span class="k">Messages</span><span class="v" id="mMessages">—</span></div>
-              <div class="mtile" id="mModelCell"><span class="k">Model</span><span class="v" id="mModel">—</span></div>
-              <div class="mtile"><span class="k">Started</span><span class="v" id="mStarted">—</span></div>
-              <div class="mtile" id="mBurnCell"><span class="k">Burn</span><span class="v" id="mBurn">—</span></div>
-              <div class="mtile" id="mSessionsCell"><span class="k">Sessions</span><span class="v" id="mSessions">—</span></div>
-            </div>
-
-            <!-- top-project chip -->
-            <div class="chip" style="align-self:flex-start"><span class="k">Top proj</span><span class="v" id="iTopProj">—</span></div>
-
-            <!-- other live sessions -->
-            <div class="live-sessions" id="otherLive">
-              <div class="sec-ttl">Other live</div>
-              <div class="rows live-session-list" id="liveSessionList"></div>
-            </div>
-
-            <!-- multi-source cards -->
-            <div class="sources source-cards" id="sourceCards" hidden></div>
-
-            <!-- top projects -->
-            <details class="collapse projects-list" id="projectsList" open>
-              <summary>
-                <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
-                <span class="proj-title sec-ttl" id="projectsListTitle" style="flex:0">Top projects</span>
-                <span class="count" id="projectsListCount"></span>
-              </summary>
-              <ol id="projectsListItems"></ol>
-            </details>
-
-          </div>
-        </details>
-
-      </div><!-- /.flyout-body -->
-
-      <!-- footer -->
-      <footer class="b-foot flyout-foot">
-        <span class="meta" id="footMeta">watching your AI sessions</span>
-        <div class="foot-actions actions">
-          <button class="txtbtn primary" id="exportBtn" data-tip="Export CSV (Ctrl+E)">Export</button>
-          <button class="txtbtn" id="reportBtn" data-tip="Open 30-day report in browser">Report</button>
-          <button class="txtbtn" id="copySummaryBtn" data-tip="Copy usage summary (Ctrl+C)">Copy</button>
-          <button class="txtbtn" id="openLogsBtn" data-tip="Open ~/.claude/projects (Ctrl+L)">Logs</button>
-          <details class="foot-more" id="footMore">
-            <summary class="txtbtn" aria-label="More actions" data-tip="More actions">···</summary>
-            <div class="foot-more-menu" role="menu">
-              <button class="txtbtn" id="copyPathBtn" data-tip="Copy scan path" role="menuitem">Copy scan path</button>
-              <button class="txtbtn" id="openActiveBtn" data-tip="Open active session file" role="menuitem">Open active session</button>
-              <button class="txtbtn" id="checkUpdateBtn" data-tip="Check for updates" role="menuitem">Check for updates</button>
-            </div>
-          </details>
-        </div>
-      </footer>
-
-      <!-- settings overlay (slides up; hidden by default) -->
-      <div class="settings-overlay" id="settingsOverlay" hidden>
-        <div class="settings-head">
-          <div class="title"><span class="title-mark">S</span>Settings</div>
-          <div class="settings-head-tools">
-            <input type="search" id="settingsSearch" class="settings-search" placeholder="Search settings…" aria-label="Filter settings">
-            <button class="ibtn" id="settingsCloseBtn" aria-label="Close settings" data-tip="Close (Esc)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="settings-toolbar">
-          <div class="settings-eyebrow">Quick</div>
-          <div class="range-tabs settings-quick-tabs" id="settingsQuick" role="toolbar" aria-label="Quick settings"></div>
-        </div>
-
-        <nav class="range-tabs settings-nav" id="settingsNav" aria-label="Settings sections"></nav>
-
-        <div class="settings-body" id="settingsBody">
-          <div class="settings-status" id="settingsStatus" hidden role="status"></div>
-
-          <details class="settings-section-collapse" id="settings-sec-key" data-section="key" open>
-            <summary class="settings-section-summary"><span class="sec-title">Anthropic API Key</span></summary>
-            <div class="settings-section-body">
-              <div class="settings-row settings-row-stack">
-                <div class="settings-row-main">
-                  <div class="lbl">Admin key</div>
-                  <div class="desc">Org-wide API spend (<span class="mono">sk-ant-admin01-…</span>). Encrypted on this machine.</div>
-                  <div class="input-row">
-                    <input type="password" id="adminKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-ant-admin01-…" aria-label="Anthropic admin key">
-                    <button class="btn-sm" id="testKeyBtn">Test</button>
-                    <button class="btn-sm" id="clearKeyBtn">Clear</button>
-                  </div>
-                  <div class="status-line" id="keyStatus" aria-live="polite"></div>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <details class="settings-section-collapse" id="settings-sec-key-or" data-section="key-or">
-            <summary class="settings-section-summary"><span class="sec-title">OpenRouter Key</span></summary>
-            <div class="settings-section-body">
-              <div class="settings-row settings-row-stack">
-                <div class="settings-row-main">
-                  <div class="lbl">OpenRouter API key</div>
-                  <div class="desc">Account-wide actual spend across all keys/devices (<span class="mono">sk-or-…</span>). Today's number is tracked since supr.bar launched — see the provider docs for the exact semantics.</div>
-                  <div class="input-row">
-                    <input type="password" id="openrouterKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-or-…" aria-label="OpenRouter API key">
-                    <button class="btn-sm" id="testOpenrouterBtn">Test</button>
-                    <button class="btn-sm" id="clearOpenrouterBtn">Clear</button>
-                  </div>
-                  <div class="status-line" id="openrouterKeyStatus" aria-live="polite"></div>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <details class="settings-section-collapse" id="settings-sec-key-oa" data-section="key-oa">
-            <summary class="settings-section-summary"><span class="sec-title">OpenAI Key</span></summary>
-            <div class="settings-section-body">
-              <div class="settings-row settings-row-stack">
-                <div class="settings-row-main">
-                  <div class="lbl">OpenAI admin key</div>
-                  <div class="desc">Org-wide daily costs (<span class="mono">sk-admin-…</span>, needs the Administrator role). Encrypted on this machine.</div>
-                  <div class="input-row">
-                    <input type="password" id="openaiKeyInput" class="input-fld wide" autocomplete="off" spellcheck="false" placeholder="sk-admin-…" aria-label="OpenAI admin key">
-                    <button class="btn-sm" id="testOpenaiBtn">Test</button>
-                    <button class="btn-sm" id="clearOpenaiBtn">Clear</button>
-                  </div>
-                  <div class="status-line" id="openaiKeyStatus" aria-live="polite"></div>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <!-- Dynamically rendered sections from /api/prefs + /api/prefs/schema -->
-          <div id="settingsSections" class="settings-dynamic"></div>
-          <div class="settings-empty" id="settingsEmpty" hidden>
-            <p>No settings match your search.</p>
-            <button type="button" class="btn-sm" id="settingsClearSearch">Clear search</button>
-          </div>
-
-          <details class="settings-section-collapse" id="settings-sec-diagnostics">
-            <summary class="settings-section-summary"><span class="sec-title">Diagnostics</span></summary>
-            <div class="settings-section-body">
-              <div class="settings-row settings-row-stack">
-                <div class="settings-row-main">
-                  <pre class="diag-pre" id="diagnosticsText">Loading…</pre>
-                  <div class="input-row">
-                    <button class="btn-sm" id="copyDiagBtn" type="button">Copy JSON</button>
-                    <button class="btn-sm" id="openLogBtn" type="button">Open log</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <details class="settings-section-collapse" id="settings-sec-about">
-            <summary class="settings-section-summary"><span class="sec-title">About</span></summary>
-            <div class="settings-section-body">
-              <div class="settings-row settings-row-stack">
-                <div class="settings-row-main">
-                  <div class="lbl">supr.bar <span id="aboutVersion">v0.8</span></div>
-                  <div class="desc">Shortcuts: <span class="mono">Esc</span> close · <span class="mono">F5</span> refresh · <span class="mono">1–7</span> ranges · <span class="mono">Ctrl+C</span> copy · <span class="mono">Ctrl+,</span> settings · <span class="mono">?</span> help</div>
-                </div>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-main">
-                  <div class="lbl">Updates</div>
-                  <div class="desc" id="updateAboutStatus">Checking for updates…</div>
-                  <div class="desc" style="margin-top:6px">Updates are downloaded from GitHub. This build isn't code-signed, so Windows SmartScreen may warn — choose "More info → Run anyway".</div>
-                </div>
-                <div class="ctl-wrap">
-                  <button class="btn-sm" id="checkUpdateBtn2" type="button">Check now</button>
-                </div>
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <div class="settings-foot b-foot">
-          <span class="settings-foot-hint">Config snapshot</span>
-          <div class="foot-actions">
-            <button class="btn-sm" id="exportConfigBtn" data-tip="Download a config snapshot">Export</button>
-            <button class="btn-sm" id="importConfigBtn" data-tip="Restore from a snapshot">Import</button>
-            <button class="btn-sm danger" id="resetConfigBtn" data-tip="Restore defaults (keeps API key)">Reset</button>
-            <input type="file" id="importFileInput" accept="application/json" hidden>
-          </div>
-        </div>
-      </div>
-
-      <!-- drag-resize grip (frameless window) -->
-      <div class="resize-grip" id="resizeGrip" title="Drag to resize" aria-hidden="true"></div>
+  <section class="sheet" id="sheet" hidden aria-label="Settings">
+    <header class="head">
+      <span class="brand">Settings</span>
+      <span class="grow"></span>
+      <button class="ibtn" id="sheetClose" title="Close" aria-label="Close settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="sheet-body">
+      <h3>Sources</h3>
+      <div id="srcRows"></div>
+      <h3>General</h3>
+      <label class="row">
+        <span>Mini overlay<small>Always-on-top chip with the last 24h</small></span>
+        <input type="checkbox" data-path="mini.enabled" />
+      </label>
+      <label class="row">
+        <span>Keep flyout open<small>Don't hide when you click elsewhere</small></span>
+        <input type="checkbox" data-path="ui.pinned" />
+      </label>
+      <label class="row">
+        <span>Start on login<small>Launch supr.bar when you sign in</small></span>
+        <input type="checkbox" data-path="ui.start_on_login" />
+      </label>
+      <label class="row">
+        <span>Check for updates<small>At launch and every 6 hours</small></span>
+        <input type="checkbox" data-path="updates.check_on_launch" />
+      </label>
     </div>
-  </div>
-
-  <!-- shortcuts help overlay (native <dialog>) -->
-  <dialog id="shortcutsHelp" class="shortcuts-help" aria-label="Keyboard shortcuts">
-    <div class="sh-head">
-      <div class="title">Keyboard shortcuts</div>
-      <form method="dialog"><button class="ibtn" value="close" aria-label="Close shortcuts">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button></form>
-    </div>
-    <ul class="sh-list">
-      <li><span class="sh-desc">Close popup</span><kbd>Esc</kbd></li>
-      <li><span class="sh-desc">Refresh data</span><kbd>F5</kbd></li>
-      <li><span class="sh-desc">Quit app</span><kbd>Alt+Q</kbd></li>
-      <li><span class="sh-desc">Open settings</span><kbd>Ctrl+,</kbd></li>
-      <li><span class="sh-desc">Open logs folder</span><kbd>Ctrl+L</kbd></li>
-      <li><span class="sh-desc">Focus API key</span><kbd>Ctrl+K</kbd></li>
-      <li><span class="sh-desc">Export CSV</span><kbd>Ctrl+E</kbd></li>
-      <li><span class="sh-desc">Refresh (space, outside controls)</span><kbd>Space</kbd></li>
-      <li><span class="sh-desc">Copy summary</span><kbd>Ctrl+C</kbd></li>
-      <li><span class="sh-desc">Switch ranges</span><kbd>1–7</kbd></li>
-      <li><span class="sh-desc">Hide window</span><kbd>Ctrl+W</kbd></li>
-      <li><span class="sh-desc">This help</span><kbd>?</kbd></li>
-    </ul>
-  </dialog>
-
-  <!-- toast (JS toggles [hidden] + .show) -->
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <footer class="foot"><span id="version"></span></footer>
+  </section>
 
   <script src="/app.js"></script>
 </body>

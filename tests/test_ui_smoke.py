@@ -183,13 +183,13 @@ class UiSmokeTest(unittest.TestCase):
             browser = self._launch(pw)
             try:
                 page, errors = self._open(browser, "/", 360, 480)
-                self._wait_text(page, "#costWhole", "18")
-                self.assertIn(".74", page.text_content("#costCents"))
-                self.assertIn("Today", page.text_content("#costLabel"))
-                self.assertEqual(page.locator("#rangeTabs .rt").count(), 7)
-                self.assertIn("2", page.text_content("#liveCount"))
-                # Frameless resize grip is present + clickable.
-                self.assertTrue(page.is_visible("#resizeGrip"))
+                self._wait_text(page, "#cost", "$18.74")
+                self.assertIn("132 messages", page.text_content("#sub"))
+                self.assertEqual(page.locator("#tabs button").count(), 4)
+                self.assertEqual(page.get_attribute("#status", "data-state"),
+                                 "live")
+                self.assertTrue(page.is_visible("#burn"))
+                self.assertGreater(page.locator("#bars span").count(), 0)
                 self.assertEqual(errors, [])
             finally:
                 browser.close()

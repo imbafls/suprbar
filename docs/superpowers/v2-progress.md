@@ -23,7 +23,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] T5 Config schema v5 + migration (tests first) — 6 new tests written first (5 failed), now pass; SCHEMA = 12 paths (6 sources, mini, pin, login, 3 update); copy of real config.json: v4→v5, sources incl. key blobs identical, 5 top-level keys; gate green (25 passed)
 - [x] T6 Settings API (tests first), remove old routes — tests/test_server_settings.py (6 tests, written first, errored) now pass: shape w/o plaintext keys, each setting persists, login applied, mini callback fires, bad paths 400, key set/clear, test-key source check, 13 removed routes 404; old config/prefs/health/diagnostics/open-path code + 5 config helpers deleted; gate green (29 passed)
 - [x] T7 Tray menu trim + clean quit — build_menu(): Open, Mini overlay, Refresh, 30-day report, Settings…, Quit (+ hidden-unless-available Update); Pin/About/Check-for-updates gone; children stop in parallel + 6 s os._exit watchdog; periodic check obeys updates.check_on_launch; source instance with flyout child quit via /api/quit in 1.1 s, 0 leftover descendants; gate green
-- [ ] T8 New flyout page (index.html + app.js)
+- [x] T8 New flyout page (index.html + app.js) — app.js 2,677→362 lines, index.html 89, fresh styles.css 237 (tokens kept for mini); browser pane 360×480 on a source server: Today (live pill, $411.95, burn, chips, hourly bars, projects/models) and 30d ($78,460, daily bars, 'today only' chips) render, settings sheet renders 6 sources + 4 toggles, a toggle persisted via re-GET (restored), 0 console errors; only kept routes used; smoke test updated; gate green
 - [ ] T9 Trim styles.css
 - [ ] T10 Trim the mini overlay
 - [ ] T11 Blank-flyout guard
