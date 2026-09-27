@@ -27,7 +27,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] T9 Trim styles.css — rewritten in T8 (859→237 lines, target ≤450: dark tokens + indigo only; light theme, 4 accent ramps, density/font/motion, context menu, dialogs, shortcuts, budget and old settings styles gone); audit script: 0 rules without a user, 0 page classes without a rule, 0 unused / 0 undefined tokens (flyout + mini); no CSS change since T8's screenshots
 - [x] T10 Trim the mini overlay — mini.js 228→82, mini.css 176→47, mini.html 55→33; no prefs/budget/range/localStorage; browser pane: chip 176×44 ($455.2 · $200.0/h) and card 208×118 (project · $/h, 24h cost, 'last 24h · N msgs', 'today $X', no overflow); harness: mini.enabled on → window visible 176×44, off → process exit 0; setting restored; smoke test updated; gate green
 - [x] T11 Blank-flyout guard — before: cold window shown at +0.80 s, page's first /api/today at +1.05 s (blank flash); after: first show waits for pywebview `loaded` (≤3 s): /api/today +1.02 s, shown +1.11/+1.12 s on two runs; toggle/re-show still correct; gate green
-- [ ] T12 Scanner rollover + index equality tests
+- [x] T12 Scanner rollover + index equality tests — tests/test_scanner_rollover.py: today resets across local midnight (pinned clock, cached scanner), 8-day whole-day index == exact scan (totals, sessions, projects, by_model, by_project); mutation checks: no date reset → 2≠1 fails, off-by-one index window → 12≠14 fails; gate green (33 passed)
 - [ ] T13 UI smoke test + dead-code sweep
 
 ## 4. Verify
