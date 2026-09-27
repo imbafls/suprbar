@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from . import config, server, updater
 from . import __version__
-from .popup import TrayBridge
+from .windows import FlyoutController
 
 log = logging.getLogger("suprbar.tray")
 
@@ -214,7 +214,7 @@ def _source_ids(data: dict) -> tuple[str, ...]:
 # ---------- TrayApp ----------
 
 class TrayApp:
-    def __init__(self, bridge: TrayBridge):
+    def __init__(self, bridge: FlyoutController):
         self.bridge = bridge
         self._icon: pystray.Icon | None = None
         self._stop = threading.Event()
@@ -227,6 +227,12 @@ class TrayApp:
         self._live_bright = _render(live=True, brighter=True)
         self._pulse_timer: threading.Timer | None = None
         self._last_icon_key: tuple = (False, "default")
+        # (live, palette) -> rendered icon; each render is a 256px per-pixel
+        # Python loop, so budget-colour flips reuse earlier renders.
+        self._icon_cache: dict[tuple[bool, str], Image.Image] = {
+            (False, "default"): self._idle_icon,
+            (True, "default"): self._live_icon,
+        }
         # window key -> last notified state ("ok" / "warn" / "over")
         self._budget_alerts: dict[str, str] = {}
 
@@ -463,7 +469,11 @@ class TrayApp:
         key = (live, palette)
         if (key != self._last_icon_key) and self._icon:
             try:
-                self._icon.icon = _render(live=live, palette=palette)
+                img = self._icon_cache.get(key)
+                if img is None:
+                    img = self._icon_cache[key] = _render(live=live,
+                                                          palette=palette)
+                self._icon.icon = img
             except Exception:
                 pass
         self._last_live = live
@@ -538,14 +548,7 @@ class TrayApp:
     def _sync_mini(self) -> None:
         """Keep overlay visibility in step with the persisted pref."""
         try:
-            mini = self.bridge.mini
-            if mini is None:
-                return
-            if config.mini_enabled():
-                if not mini.is_visible():
-                    mini.show()
-            elif mini.is_visible():
-                mini.hide()
+            self.bridge.mini.sync()
         except Exception:
             log.debug("mini sync failed", exc_info=True)
 

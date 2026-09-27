@@ -16,9 +16,9 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.15 — **resizable flyout**, a trimmed settings panel (schema v4,
-> 14 fewer toggles), and a **mini overlay showing rolling 24h** that expands on
-> hover.
+> **Status:** v0.16 — **light**: ~27 MB idle. The flyout and mini overlay
+> run as short-lived WebView2 child processes, and range tabs are served from
+> a per-day index instead of re-reading your whole history.
 
 ## What it does
 

@@ -1,9 +1,10 @@
 """Frameless WebView2 popout for the supr.bar flyout.
 
-Threading:
-  webview.start() must run on the main thread. We launch the tray on a
-  background thread via a callback passed to start(). pystray callbacks then
-  call into this module's TrayBridge to show/hide/toggle the window.
+Process model:
+  This module is only imported by the flyout child process (windowhost.py),
+  never by the tray process, so WebView2 is loaded only while the flyout
+  exists. The tray drives it through stdin commands that land on
+  FlyoutBridge; FlyoutBridge reports back through its ``notify`` callback.
 
 Window:
   * 360 x 480 px (matches MVP "Tray · live session" artboard, room for footer)
@@ -29,14 +30,10 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 import webview
 
 from . import config
-
-if TYPE_CHECKING:
-    from .mini import MiniBridge
 
 log = logging.getLogger("suprbar.popup")
 
@@ -388,60 +385,6 @@ def set_window_pos_size(hwnd: int, x: int, y: int,
         log.debug("set_window_pos_size failed: %s", e)
 
 
-# ---------- Single-instance mutex ----------
-
-_mutex_handle: int | None = None
-
-
-def acquire_single_instance() -> bool:
-    """Try to acquire the global single-instance mutex.
-
-    Returns True if this process is the sole instance. Returns False if
-    another suprbar is already running (and SUPRBAR_FORCE is not set).
-    Always returns True on non-Windows platforms.
-    """
-    global _mutex_handle
-    if sys.platform != "win32":
-        return True
-    if os.environ.get("SUPRBAR_FORCE") == "1":
-        return True
-    try:
-        kernel32 = ctypes.windll.kernel32
-        CreateMutexW = kernel32.CreateMutexW
-        CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
-        CreateMutexW.restype = wintypes.HANDLE
-        ERROR_ALREADY_EXISTS = 183
-        handle = CreateMutexW(None, True, "Global\\suprbar-single-instance")
-        last_err = kernel32.GetLastError()
-        if last_err == ERROR_ALREADY_EXISTS:
-            # Another instance already owns the mutex. Release our handle.
-            try:
-                kernel32.CloseHandle(handle)
-            except OSError:
-                pass
-            return False
-        _mutex_handle = handle
-        return True
-    except OSError as e:
-        log.debug("mutex acquire failed: %s", e)
-        return True  # don't block startup on a mutex API error
-
-
-def release_single_instance() -> None:
-    global _mutex_handle
-    if sys.platform != "win32" or _mutex_handle in (None, 0):
-        return
-    try:
-        ctypes.windll.kernel32.ReleaseMutex(_mutex_handle)
-    except OSError:
-        pass
-    try:
-        ctypes.windll.kernel32.CloseHandle(_mutex_handle)
-    except OSError:
-        pass
-    _mutex_handle = None
-
-
 # ---------- WebView2 runtime detection ----------
 
 def _show_webview2_install_dialog() -> None:
@@ -466,12 +409,17 @@ def _show_webview2_install_dialog() -> None:
         pass
 
 
-# ---------- Bridge that tray callbacks talk to ----------
+# ---------- Flyout window bridge (runs in the flyout child process) ----------
 
-class TrayBridge:
-    def __init__(self):
-        # Single-instance is enforced in __main__.main() via
-        # acquire_single_instance() before any window/tray is created.
+class FlyoutBridge:
+    """Owns the flyout window inside its child process (see windowhost.py).
+
+    ``notify`` sends an event line to the tray process: "shown" / "hidden"
+    (so it can retire an idle flyout), "quit" (Alt+Q) and "apply_mini".
+    """
+
+    def __init__(self, notify: Callable[[str], None]):
+        self._notify = notify
         self._window: webview.Window | None = None
         self._hwnd: int = 0
         self._visible = False
@@ -486,8 +434,6 @@ class TrayBridge:
         # Settings-open hint passed via URL hash. The frontend reads
         # location.hash on load to decide whether to jump to settings.
         self._open_settings_next_show = False
-        # Mini overlay bridge (attached by run() below). None until then.
-        self.mini: MiniBridge | None = None
         # One-shot: enforce the exact window size on first show (WinForms
         # autoscale shrinks the created window slightly).
         self._size_applied = False
@@ -594,6 +540,8 @@ class TrayBridge:
             self._visible = True
             self._show_settle_ts = time.monotonic()
             save_window_state({"last_visible": time.time()})
+        self._set_page_visible(True)
+        self._notify("shown")
 
     def hide(self, from_blur: bool = False) -> None:
         if not self._window:
@@ -610,12 +558,35 @@ class TrayBridge:
                 # focus is still settling.
                 if time.monotonic() - self._show_settle_ts < self._settle_seconds:
                     return
+            was_visible = self._visible
             try:
                 self._window.hide()
             except Exception as e:
                 log.debug("hide failed: %s", e)
             self._visible = False
             self._last_hide_ts = time.monotonic()
+        if was_visible:
+            self._set_page_visible(False)
+            self._notify("hidden")
+
+    def _set_page_visible(self, on: bool) -> None:
+        """Pause/resume the page's polling (app.js ``__suprbarVisible``).
+
+        Runs off-thread: evaluate_js blocks until the page has loaded.
+        """
+        w = self._window
+        if w is None:
+            return
+        js = ("window.__suprbarVisible && window.__suprbarVisible(%s)"
+              % ("true" if on else "false"))
+
+        def _run():
+            try:
+                w.evaluate_js(js)
+            except Exception as e:
+                log.debug("visibility push failed: %s", e)
+        threading.Thread(target=_run, daemon=True,
+                         name="suprbar-flyout-vis").start()
 
     def toggle(self) -> None:
         # If the user clicks the tray icon while the popup is visible, JS
@@ -633,35 +604,8 @@ class TrayBridge:
         return self._visible
 
     def quit(self) -> None:
-        """Graceful shutdown: destroy webview, clear mutex.
-
-        Order matters — we want the webview gone before pystray stops so the
-        Windows message loop can drain cleanly. The tray's _on_quit signals
-        pystray._icon.stop() afterwards.
-        """
-        # Watchdog: WebView2 teardown has been observed to hang, which used to
-        # leave a zombie process (and its always-on-top windows) behind. Give
-        # teardown a few seconds, then force the process to exit.
-        def _force_exit():
-            time.sleep(6.0)
-            log.warning("shutdown hung — forcing exit")
-            os._exit(0)
-        threading.Thread(target=_force_exit, daemon=True,
-                         name="suprbar-exit-watchdog").start()
-
-        if self._window:
-            try:
-                self._window.destroy()
-            except Exception:
-                pass
-            # If pywebview ever grows a shutdown(), call it.
-            shutdown = getattr(webview, "shutdown", None)
-            if callable(shutdown):
-                try:
-                    shutdown()
-                except Exception:
-                    pass
-        release_single_instance()
+        """Alt+Q: ask the tray process to shut the whole app down."""
+        self._notify("quit")
 
     # ---- callbacks invoked from webview event handlers ----
 
@@ -733,7 +677,7 @@ class TrayBridge:
 class JsApi:
     """Functions callable from JS as `window.pywebview.api.<name>()`."""
 
-    def __init__(self, bridge: TrayBridge):
+    def __init__(self, bridge: FlyoutBridge):
         self._bridge = bridge
 
     def hide(self):
@@ -757,19 +701,8 @@ class JsApi:
 
         Called by the settings UI after committing mini.* / unaffected prefs.
         """
-        mini = getattr(self._bridge, "mini", None)
-        if mini is None:
-            return
-        try:
-            enabled = config.mini_enabled()
-        except Exception:
-            enabled = False
-        if enabled:
-            if not mini.is_visible():
-                mini.show()
-        elif mini.is_visible():
-            mini.hide()
-        mini.apply_click_through()
+        # The overlay is its own process, owned by the tray process.
+        self._bridge._notify("apply_mini")
 
     def resize_window(self, width, height):
         """Flyout resize grip → native resize (bridge clamps to bounds)."""
@@ -788,7 +721,7 @@ class JsApi:
 
 # ---------- Window creation ----------
 
-def build_window(url: str, bridge: TrayBridge) -> webview.Window:
+def build_window(url: str, bridge: FlyoutBridge) -> webview.Window:
     global WIN_W, WIN_H
     # Size comes from the last drag-resize (window-state.json), falling back
     # to the design target. Placement as before.
@@ -852,50 +785,3 @@ def build_window(url: str, bridge: TrayBridge) -> webview.Window:
         log.debug("resized event unavailable: %s", e)
 
     return w
-
-
-def run(url: str, bridge: TrayBridge, on_started: Callable[[], None]) -> None:
-    """Blocks on the main thread until quit."""
-    build_window(url, bridge)
-
-    # The mini overlay is always created (hidden) so it can be toggled from
-    # tray/settings without a restart; it only shows when mini.enabled is set.
-    from . import mini as _mini
-    mini_bridge = _mini.MiniBridge(bridge)
-    bridge.mini = mini_bridge
-    _mini.build_window(url, mini_bridge)
-
-    def started():
-        # webview is up; safe to launch tray
-        try:
-            on_started()
-        except Exception:
-            log.exception("on_started callback failed")
-        try:
-            if config.mini_enabled():
-                mini_bridge.show()
-        except Exception:
-            log.debug("mini overlay autoshow failed", exc_info=True)
-
-    try:
-        webview.start(started, debug=False)
-    except Exception as e:
-        # Most common cause on Windows: the WebView2 runtime isn't installed.
-        msg = (str(e) or "").lower()
-        likely_webview2 = (
-            "webview2" in msg
-            or "edge" in msg
-            or "runtime" in msg
-            or "client" in msg
-            or "0x80070005" in msg
-            or "no module" in msg
-            or isinstance(e, webview.WebViewException)
-        )
-        if likely_webview2:
-            log.error("WebView2 runtime missing or failed to start: %s", e)
-            _show_webview2_install_dialog()
-        else:
-            log.exception("webview.start failed")
-        # Make sure the mutex doesn't get stranded if startup blew up.
-        release_single_instance()
-        raise

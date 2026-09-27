@@ -4,8 +4,8 @@ A second frameless WebView2 window (~176x44) showing the live pip, today's
 cost, and the current burn rate. Click opens the full flyout; the tray menu
 (or Settings) can hide it or make it click-through.
 
-Threading mirrors popup.py: the window is created on the main thread before
-``webview.start()``; tray callbacks (other threads) call show/hide/toggle.
+Runs in its own child process (windowhost.py) that exists only while the
+overlay is enabled; the tray process starts it, and stops it on disable.
 Position is persisted to the same window-state.json as the flyout (keys
 ``mini_x`` / ``mini_y``).
 """
@@ -15,12 +15,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 import webview
 
 from . import config
 from .popup import (
-    TrayBridge,
     _apply_dwm_round,
     _hide_from_taskbar,
     _hwnd_by_title,
@@ -74,10 +74,14 @@ def _snap(x: int, y: int) -> tuple[int, int]:
 
 
 class MiniBridge:
-    """Owns the overlay window; tray + settings call into this."""
+    """Owns the overlay window inside its child process.
 
-    def __init__(self, flyout: TrayBridge):
-        self._flyout = flyout
+    ``notify`` sends events to the tray process: "open_flyout" and "disable"
+    (the user dismissed the overlay).
+    """
+
+    def __init__(self, notify: Callable[[str], None]):
+        self._notify = notify
         self._window: webview.Window | None = None
         self._hwnd: int = 0
         self._visible = False
@@ -189,20 +193,9 @@ class MiniBridge:
                 log.debug("mini hide failed: %s", e)
             self._visible = False
         if persist:
-            try:
-                config.set_pref("mini.enabled", False)
-            except Exception:
-                pass
-
-    def toggle(self) -> None:
-        if self._visible:
-            self.hide(persist=True)
-        else:
-            try:
-                config.set_pref("mini.enabled", True)
-            except Exception:
-                pass
-            self.show()
+            # The tray process owns config writes; it records the dismissal
+            # and then ends this process.
+            self._notify("disable")
 
     def is_visible(self) -> bool:
         return self._visible
@@ -256,7 +249,7 @@ class MiniBridge:
         set_click_through(self._resolve_hwnd(), on)
 
     def open_flyout(self) -> None:
-        self._flyout.show()
+        self._notify("open_flyout")
 
 
 class MiniJsApi:

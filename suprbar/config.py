@@ -143,6 +143,10 @@ DEFAULTS: dict[str, Any] = {
 
 _lock = threading.Lock()
 _cache: dict[str, Any] | None = None
+# (mtime_ns, size) of config.json when _cache was read. The flyout and mini
+# overlay run in their own processes and only read config; the tray process
+# writes it. Re-reading on change keeps every process in step.
+_cache_sig: tuple[int, int] | None = None
 
 
 # ---------- DPAPI ----------
@@ -287,13 +291,23 @@ def _migrate(d: dict[str, Any]) -> dict[str, Any]:
     return d
 
 
+def _file_sig(p: Path) -> tuple[int, int] | None:
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
 def load(force: bool = False) -> dict[str, Any]:
-    global _cache
+    global _cache, _cache_sig
     with _lock:
-        if _cache is not None and not force:
-            return _cache
         p = config_path()
-        if not p.exists():
+        sig = _file_sig(p)
+        if _cache is not None and not force and sig == _cache_sig:
+            return _cache
+        _cache_sig = sig
+        if sig is None:
             _cache = json.loads(json.dumps(DEFAULTS))
             return _cache
         try:
@@ -320,8 +334,9 @@ def save(cfg: dict[str, Any]) -> None:
             cfg["schema_version"] = SCHEMA_VERSION
         tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         os.replace(tmp, p)
-        global _cache
+        global _cache, _cache_sig
         _cache = cfg
+        _cache_sig = _file_sig(p)
 
 
 def reset(reset_key: bool = False) -> dict[str, Any]:

@@ -15,13 +15,15 @@ if (window.__suprbar_inited) {
 const $ = (id) => document.getElementById(id);
 
 const POLL_MS_ACTIVE = 5000;
-const POLL_MS_HIDDEN = 60000;
 // Idle backoff: no live session means nothing new to show, so poll slower.
 // An open flyout still forces a fresh scan on focus/visibility.
 const POLL_MS_IDLE = 30000;
 let pollTimer = null;
 let pollInterval = POLL_MS_ACTIVE;
 let pollBaseMs = POLL_MS_ACTIVE;   // user-configured cadence (behavior.refresh_seconds)
+// True while the flyout is hidden. Nothing polls then: the tray keeps its own
+// tooltip fresh, and showing the flyout triggers an immediate refresh.
+let pageHidden = false;
 
 // Mirror of prefs.display, kept current by applyDisplayPrefs() so the
 // formatters below can honor cost_format / token_format without a lookup.
@@ -854,7 +856,7 @@ async function load({ refresh = false } = {}) {
     if (retryTimer) clearTimeout(retryTimer);
     const delay = Math.min(nextBackoff, MAX_BACKOFF);
     nextBackoff = Math.min(nextBackoff * 2, MAX_BACKOFF);
-    retryTimer = setTimeout(() => load(), delay);
+    if (!pageHidden) retryTimer = setTimeout(() => load(), delay);
     console.warn('today fetch failed', e);
   }
 }
@@ -1549,23 +1551,35 @@ function setPollInterval(ms) {
 
 // Live data → configured cadence; idle data → at least POLL_MS_IDLE.
 function adaptPollToData(data) {
-  if (!pollBaseMs) return;  // manual-only
+  // manual-only, or hidden: a late response must not restart polling
+  if (!pollBaseMs || pageHidden) return;
   const live = !!(data && (data.active
     || (Array.isArray(data.live_sessions) && data.live_sessions.length)));
   const ms = live ? pollBaseMs : Math.max(pollBaseMs, POLL_MS_IDLE);
   if (ms !== pollInterval) setPollInterval(ms);
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    setPollInterval(POLL_MS_HIDDEN);
+function setPageHidden(hidden) {
+  if (hidden === pageHidden) return;
+  pageHidden = hidden;
+  if (hidden) {
+    setPollInterval(0);
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   } else {
     setPollInterval(pollBaseMs || POLL_MS_ACTIVE);
     load({ refresh: true });
     loadBudgets();
   }
+}
+// popup.py pushes show/hide explicitly (a hidden WinForms host doesn't
+// reliably flip document.visibilityState); visibilitychange stays as backup.
+window.__suprbarVisible = (visible) => setPageHidden(!visible);
+document.addEventListener('visibilitychange', () => setPageHidden(document.hidden));
+window.addEventListener('focus', () => {
+  if (pageHidden) return;  // setPageHidden(false) already refreshes
+  load({ refresh: true });
+  loadBudgets();
 });
-window.addEventListener('focus', () => { load({ refresh: true }); loadBudgets(); });
 
 // ───────────────────────── Drag-resize grip (frameless) ─────────────────────────
 // The window has no native resize border (FormBorderStyle.None); dragging the
@@ -2105,7 +2119,7 @@ function maybeNotifyBudget(active) {
 
 // Budgets only matter while the flyout is visible; a hidden window polling
 // them forever re-scans for users who set limits (shown/focus refresh them).
-setInterval(() => { if (!document.hidden) loadBudgets(); }, 30_000);
+setInterval(() => { if (!pageHidden) loadBudgets(); }, 30_000);
 loadBudgets();
 
 // ──── Apply display prefs to the DOM ────

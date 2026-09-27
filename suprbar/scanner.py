@@ -82,6 +82,45 @@ def _parse_ts(s: str) -> datetime | None:
         return None
 
 
+def _walk_jsonl():
+    """Yield ``(path, project, mtime, size)`` for every JSONL under CLAUDE_HOME.
+
+    os.scandir instead of rglob + stat: on Windows the directory listing
+    already carries mtime and size, so this is one syscall per directory
+    rather than one per file (thousands of files are walked on every poll).
+    """
+    try:
+        top = list(os.scandir(CLAUDE_HOME))
+    except OSError:
+        return
+    for proj_entry in top:
+        if proj_entry.is_file(follow_symlinks=False):
+            if proj_entry.name.endswith(".jsonl"):
+                st = proj_entry.stat()
+                # Matches _project_name(): a top-level file is its own part.
+                yield proj_entry.path, proj_entry.name, st.st_mtime, st.st_size
+            continue
+        if not proj_entry.is_dir(follow_symlinks=False):
+            continue
+        proj = proj_entry.name
+        stack = [proj_entry.path]
+        while stack:
+            try:
+                it = os.scandir(stack.pop())
+            except OSError:
+                continue
+            with it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.name.endswith(".jsonl"):
+                            st = e.stat()
+                            yield e.path, proj, st.st_mtime, st.st_size
+                    except OSError:
+                        continue
+
+
 def _project_name(path: Path) -> str:
     try:
         return path.relative_to(CLAUDE_HOME).parts[0]
@@ -408,24 +447,38 @@ def today_summary() -> dict[str, Any]:
     with _scan_lock:
         _reset_cache_if_date_rolled(today.isoformat())
 
-    candidates: list[tuple[Path, float, int, dict | None, bool]] = []
-    for path in CLAUDE_HOME.rglob("*.jsonl"):
-        proj_name = _project_name(path)
+    # A file last written before the rolling cutoff can't hold a record from
+    # today or the rolling 24h window, so it is never opened. The newest file
+    # is the one exception: it still feeds "last session seen" when nothing
+    # is recent. Without this cutoff, a cold start parsed the whole history.
+    cutoff_ts = rolling_cutoff_min * 60
+    recent: list[tuple[str, float, int]] = []
+    newest: tuple[str, float, int] | None = None
+    for key, proj_name, mtime, size in _walk_jsonl():
         if _allow and proj_name not in _allow:
             continue
         if proj_name in _deny:
             continue
         files_scanned += 1
-        try:
-            st = path.stat()
-        except OSError:
-            continue
-        last_file_seen_ts = max(last_file_seen_ts, st.st_mtime)
-        key = str(path)
+        last_file_seen_ts = max(last_file_seen_ts, mtime)
+        if newest is None or mtime > newest[1]:
+            newest = (key, mtime, size)
+        if mtime >= cutoff_ts:
+            recent.append((key, mtime, size))
+    if newest is not None and newest[1] < cutoff_ts:
+        recent.append(newest)
+
+    candidates: list[tuple[Path, float, int, dict | None, bool]] = []
+    for key, mtime, size in recent:
         cached = _file_cache.get(key)
-        fresh = bool(cached and cached.get("mtime") == st.st_mtime
-                     and cached.get("size") == st.st_size)
-        candidates.append((path, st.st_mtime, st.st_size, cached, fresh))
+        fresh = bool(cached and cached.get("mtime") == mtime
+                     and cached.get("size") == size)
+        candidates.append((Path(key), mtime, size, cached, fresh))
+    # Drop cache entries for files that aged out, so the cache stays bounded.
+    with _scan_lock:
+        keep = {key for key, _m, _s in recent}
+        for stale in [k for k in _file_cache if k not in keep]:
+            del _file_cache[stale]
 
     # Parse anything without a fresh cache hit in a small thread pool.
     # Files that only grew since their last parse get a tail read from the
@@ -875,6 +928,243 @@ def _range_scan_one_file(path: Path, proj: str,
     }
 
 
+# ---------- persistent per-day index (whole-day ranges) ----------
+#
+# Range tabs used to re-read every JSONL on every click (gigabytes on a busy
+# machine). Instead each file is folded once into token counts per
+# (local date, model) and only its newly appended bytes are read afterwards.
+# Tokens, not dollars, are stored: cost is linear in tokens, so pricing it at
+# query time keeps the index valid across pricing-table updates. The index
+# is saved to disk so a restart doesn't pay for the full history again.
+#
+# path -> {"m": mtime, "s": size, "o": byte offset folded so far,
+#          "e": parse errors, "d": {date: {model: [msgs, in, out, c5, c1, cr]}},
+#          "sid": {date: [session ids]}}
+
+_INDEX_VERSION = 1
+_INDEX_SAVE_INTERVAL = 300.0
+_INDEX_BULK = 20  # newly indexed files that make a save immediate
+_index_lock = threading.Lock()
+_index: dict[str, dict[str, Any]] = {}
+_index_loaded = False
+_index_dirty = False
+_index_saved_at = 0.0
+
+
+def _index_path() -> Path:
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(
+            Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "suprbar" / "scan-index.json"
+
+
+def _tz_key() -> str:
+    """Dates in the index are local; a timezone change invalidates them."""
+    return f"{time.timezone}/{time.altzone}/{'|'.join(time.tzname)}"
+
+
+def _index_load() -> None:
+    global _index_loaded
+    if _index_loaded:
+        return
+    _index_loaded = True
+    try:
+        raw = json.loads(_index_path().read_text("utf-8"))
+    except (OSError, ValueError):
+        return
+    if (isinstance(raw, dict) and raw.get("v") == _INDEX_VERSION
+            and raw.get("tz") == _tz_key()
+            and isinstance(raw.get("files"), dict)):
+        _index.update(raw["files"])
+
+
+def _index_save(force: bool = False) -> None:
+    """Write the index if it changed (caller holds _index_lock).
+
+    Throttled so a live session's small tail updates don't rewrite the file
+    on every poll; ``force`` saves a bulk build right away.
+    """
+    global _index_dirty, _index_saved_at
+    if not _index_dirty:
+        return
+    now = time.monotonic()
+    if not force and _index_saved_at \
+            and now - _index_saved_at < _INDEX_SAVE_INTERVAL:
+        return
+    path = _index_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(
+            {"v": _INDEX_VERSION, "tz": _tz_key(), "files": _index},
+            separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, path)
+        _index_dirty = False
+        _index_saved_at = now
+    except OSError:
+        pass
+
+
+def _index_file(path: str, mtime: float, size: int,
+                prev: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Fold a file's new bytes into its index entry (a fresh copy)."""
+    start = 0
+    if prev and 0 < int(prev.get("o", 0)) <= size:
+        start = int(prev["o"])
+        days = {d: {m: list(r) for m, r in ms.items()}
+                for d, ms in prev.get("d", {}).items()}
+        sids = {d: list(v) for d, v in prev.get("sid", {}).items()}
+        errors = int(prev.get("e", 0))
+    else:
+        days, sids, errors = {}, {}, 0
+    offset = start
+    buf = b""
+    try:
+        with open(path, "rb") as f:
+            if start:
+                f.seek(start)
+            while True:
+                chunk = f.read(_LINE_CHUNK)
+                if not chunk:
+                    break
+                offset += len(chunk)
+                buf += chunk
+                parts = buf.split(b"\n")
+                buf = parts.pop()
+                for raw in parts:
+                    if b'"usage"' not in raw:
+                        continue
+                    try:
+                        rec = json.loads(raw)
+                    except ValueError:
+                        errors += 1
+                        continue
+                    dt = _parse_ts(rec.get("timestamp"))
+                    if dt is None:
+                        continue
+                    msg = rec.get("message") or {}
+                    usage = msg.get("usage")
+                    if not usage:
+                        continue
+                    model = msg.get("model") or ""
+                    fields = _extract_usage_fields(usage, model)
+                    day = dt.astimezone().date().isoformat()
+                    row = days.setdefault(day, {}).setdefault(
+                        model, [0, 0, 0, 0, 0, 0])
+                    row[0] += 1
+                    row[1] += fields["input"]
+                    row[2] += fields["output"]
+                    row[3] += fields["cache_5m"]
+                    row[4] += fields["cache_1h"]
+                    row[5] += fields["cache_read"]
+                    sid = rec.get("sessionId")
+                    if sid:
+                        day_sids = sids.setdefault(day, [])
+                        if sid not in day_sids:
+                            day_sids.append(sid)
+    except OSError:
+        return None
+    return {"m": mtime, "s": size, "o": offset - len(buf), "e": errors,
+            "d": days, "sid": sids}
+
+
+def _index_refresh(paths: list[tuple[str, str, float, int]],
+                   walked: set[str]) -> dict[str, dict[str, Any]]:
+    """Bring the index entries for ``paths`` up to date; return them."""
+    global _index_dirty
+    with _index_lock:
+        _index_load()
+        todo = []
+        for key, _proj, mtime, size in paths:
+            e = _index.get(key)
+            if not (e and e.get("m") == mtime and e.get("s") == size):
+                todo.append((key, mtime, size, e))
+    if todo:
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
+            futs = {ex.submit(_index_file, k, m, s, e): k
+                    for (k, m, s, e) in todo}
+            fresh = {}
+            for fut, k in futs.items():
+                try:
+                    entry = fut.result()
+                except Exception:
+                    entry = None
+                if entry is not None:
+                    fresh[k] = entry
+    else:
+        fresh = {}
+    with _index_lock:
+        if fresh:
+            _index.update(fresh)
+            _index_dirty = True
+        for gone in [k for k in _index if k not in walked]:
+            del _index[gone]
+            _index_dirty = True
+        _index_save(force=len(fresh) > _INDEX_BULK)
+        return {k: _index[k] for k, _p, _m, _s in paths if k in _index}
+
+
+def _index_partial(entry: dict[str, Any], proj: str, first_day, last_day,
+                   include_weekends: bool) -> dict[str, Any]:
+    """One file's contribution to a whole-day range, in the shape
+    _range_scan_one_file returns (so both paths share the merge)."""
+    lo, hi = first_day.isoformat(), last_day.isoformat()
+    totals = _zero_bucket()
+    by_day: dict[str, list] = {}
+    by_model: dict[str, list] = {}
+    models: set[str] = set()
+    sessions: set[str] = set()
+    for day, per_model in entry.get("d", {}).items():
+        if day < lo or day > hi:
+            continue
+        if not include_weekends and \
+                datetime.fromisoformat(day).weekday() >= 5:
+            continue
+        sessions.update(entry.get("sid", {}).get(day, ()))
+        for model, (n, i, o, c5, c1, cr) in per_model.items():
+            cost = cost_for(model or family_for(model), {
+                "input_tokens": i, "output_tokens": o,
+                "cache_creation": {"ephemeral_5m_input_tokens": c5,
+                                   "ephemeral_1h_input_tokens": c1},
+                "cache_read_input_tokens": cr})
+            tokens = i + o + c5 + c1 + cr
+            _add(totals, {"input": i, "output": o, "cache_5m": c5,
+                          "cache_1h": c1, "cache_read": cr, "cost": cost,
+                          "messages": n})
+            d = by_day.setdefault(day, [0.0, 0, 0])
+            d[0] += cost
+            d[1] += n
+            d[2] += tokens
+            if model:
+                m = by_model.setdefault(model, [0.0, 0, 0])
+                m[0] += cost
+                m[1] += n
+                m[2] += tokens
+                models.add(model)
+    return {
+        "totals": totals,
+        "by_day": by_day,
+        "by_model": by_model,
+        "project": {"name": proj, "cost": totals["cost"],
+                    "messages": totals["messages"],
+                    "tokens": int(totals["input"] + totals["output"]
+                                  + totals["cache_5m"] + totals["cache_1h"]
+                                  + totals["cache_read"]),
+                    "models": models},
+        "hourly": None,
+        "sessions": sessions,
+        "parse_errors": int(entry.get("e", 0)),
+    }
+
+
+def _is_local_midnight(dt: datetime) -> bool:
+    local = dt.astimezone()
+    return (local.hour, local.minute, local.second, local.microsecond) \
+        == (0, 0, 0, 0)
+
+
 def range_summary(range_key: str = "today",
                   custom_start: str | None = None,
                   custom_end:   str | None = None,
@@ -926,25 +1216,36 @@ def range_summary(range_key: str = "today",
     if not CLAUDE_HOME.exists():
         return _empty_range(label, start_utc, end_utc, started_at)
 
-    # Range scans re-read every file, so fan out across the same worker pool
-    # the today scan uses. Workers return partial aggregates; merging is
-    # order-independent (sums/sets).
-    paths: list[tuple[Path, str]] = []
-    for path in CLAUDE_HOME.rglob("*.jsonl"):
+    # A file last written before the window opened can't contain a record
+    # inside it, so it is skipped without being opened.
+    start_ts = start_utc.timestamp()
+    walked: set[str] = set()
+    paths: list[tuple[str, str, float, int]] = []
+    for key, proj, mtime, size in _walk_jsonl():
         files_scanned += 1
-        proj = _project_name(path)
+        walked.add(key)
         if allow and proj not in allow:
             continue
         if proj in deny:
             continue
-        paths.append((path, proj))
+        if mtime < start_ts:
+            continue
+        paths.append((key, proj, mtime, size))
 
     want_hourly = (end_dt - start_dt) <= timedelta(hours=25)
+    # Whole local days (7d / 30d / week / month / report windows) are served
+    # from the persistent per-day index; sub-day and UTC-bounded windows fall
+    # back to an exact scan of the (already mtime-filtered) files.
+    use_index = (day_boundary != "utc" and not want_hourly
+                 and _is_local_midnight(start_dt)
+                 and _is_local_midnight(end_dt))
 
     def _merge_partial(res: dict[str, Any]) -> None:
         nonlocal parse_errors
-        _add(totals, res["totals"])
         parse_errors += res["parse_errors"]
+        if not res["totals"]["messages"]:
+            return
+        _add(totals, res["totals"])
         if res["sessions"]:
             sessions_seen.update(res["sessions"])
         for day, v in res["by_day"].items():
@@ -970,12 +1271,21 @@ def range_summary(range_key: str = "today",
                 hourly[h]["tokens"] += rh[h][1]
                 hourly[h]["messages"] += rh[h][2]
 
-    if paths:
+    if paths and use_index:
+        entries = _index_refresh(paths, walked)
+        first_day = start_dt.date()
+        last_day = (end_dt - timedelta(days=1)).date()
+        for key, proj, _m, _s in paths:
+            entry = entries.get(key)
+            if entry:
+                _merge_partial(_index_partial(entry, proj, first_day, last_day,
+                                              include_weekends))
+    elif paths:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
-            futs = [ex.submit(_range_scan_one_file, p, proj,
+            futs = [ex.submit(_range_scan_one_file, Path(p), proj,
                               start_utc, end_utc, include_weekends,
                               want_hourly)
-                    for (p, proj) in paths]
+                    for (p, proj, _m, _s) in paths]
             for fut in futs:
                 try:
                     res = fut.result()

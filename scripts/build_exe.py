@@ -17,11 +17,19 @@ Optional:
 from __future__ import annotations
 
 import shutil
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# The ▶/— glyphs below crash a cp1252 Windows console; never fail a build
+# over log output.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+except (AttributeError, ValueError):
+    pass
 
 
 def step(msg: str) -> None:
@@ -79,8 +87,11 @@ def build_installer() -> Path | None:
     step("Looking for Inno Setup (iscc)")
     iscc = shutil.which("iscc") or shutil.which("ISCC.exe")
     if not iscc:
+        local = os.environ.get("LOCALAPPDATA", "")
         for p in (r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-                  r"C:\Program Files\Inno Setup 6\ISCC.exe"):
+                  r"C:\Program Files\Inno Setup 6\ISCC.exe",
+                  # winget --scope user installs here
+                  os.path.join(local, "Programs", "Inno Setup 6", "ISCC.exe")):
             if Path(p).exists():
                 iscc = p; break
     if not iscc:

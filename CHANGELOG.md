@@ -1,5 +1,28 @@
 # supr.bar CHANGELOG
 
+## v0.16.0 — light: ~27 MB when idle instead of ~390 MB
+
+- **The tray process no longer loads WebView2.** The flyout runs in its own
+  child process, started when you open it and ended 60 seconds after it is
+  hidden (re-opening within that window is instant; after it, about a
+  second). Idle, supr.bar is now one small process (measured: 27 MB private,
+  40 MB working set, down from ~390 MB / ~650 MB across 8 processes).
+- **The mini overlay's WebView2 exists only while the overlay is enabled.**
+  It used to be created, hidden, and polling even when turned off.
+- **No polling while the flyout is hidden.** The hidden flyout kept fetching
+  every 5–60 s (a late response could even reset it to 5 s), and a range tab
+  left open re-scanned the whole history in the background.
+- **Scans read only what can matter.** The today scan skips files not written
+  in the last 25 hours (a cold start went from 16 s to under 0.1 s on a
+  2.7 GB / 4,300-file history), and range tabs, budgets and the 30-day report
+  are served from a per-day token index kept in
+  `%LOCALAPPDATA%\suprbar\scan-index.json`, so each file is parsed once
+  instead of on every click (10–13 s per tab → ~0.1 s). Costs are priced at
+  query time, so pricing-table updates still apply to past usage.
+- Range results no longer list projects that had no usage in the window.
+- WebView2 now uses a persistent profile in `%LOCALAPPDATA%\suprbar\webview`
+  instead of a temp folder per launch, which could be left behind.
+
 ## v0.15.6 — no more zombie instances
 
 - **Fixed: a hung shutdown could leave a stale supr.bar process running**,

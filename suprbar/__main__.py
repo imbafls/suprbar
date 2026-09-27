@@ -11,13 +11,7 @@ import sys
 import threading
 
 from . import config, pricing, server, updater
-from .popup import (
-    TrayBridge,
-    acquire_single_instance,
-    release_single_instance,
-    run as run_popup,
-)
-from .tray import TrayApp
+from .instance import acquire_single_instance, release_single_instance
 
 DEFAULT_PORT = 47821
 
@@ -109,7 +103,25 @@ def _terminate_stale_instances() -> None:
                     ", ".join(str(p) for p in killed))
 
 
+def _window_args(argv: list[str]) -> tuple[str, str] | None:
+    """``--window <kind> --url <url>`` marks a window child process."""
+    if "--window" not in argv:
+        return None
+    try:
+        kind = argv[argv.index("--window") + 1]
+        url = argv[argv.index("--url") + 1]
+    except (ValueError, IndexError):
+        return None
+    return kind, url
+
+
 def main() -> int:
+    child = _window_args(sys.argv[1:])
+    if child is not None:
+        # A flyout / mini overlay child: no mutex, no server, no tray.
+        from .windowhost import run as run_window
+        return run_window(*child)
+
     setup_logging()
     log = logging.getLogger("suprbar")
 
@@ -135,10 +147,14 @@ def main() -> int:
     log.info("http server on 127.0.0.1:%d (pid=%d)", port, os.getpid())
 
     url = f"http://127.0.0.1:{port}/"
-    bridge = TrayBridge()
-    tray = TrayApp(bridge)
-
     shutdown_event = threading.Event()
+
+    from .tray import TrayApp
+    from .windows import FlyoutController
+    # Windows live in child processes (windows.py); this process never loads
+    # WebView2, so it stays small while the flyout is closed.
+    bridge = FlyoutController(url, on_quit=lambda: shutdown_app())
+    tray = TrayApp(bridge)
 
     def shutdown_app(*_args):
         # Called by /api/quit (Alt+Q from the popup, or tray Quit menu)
@@ -190,16 +206,12 @@ def main() -> int:
         except (ValueError, OSError):
             pass
 
-    def on_webview_started():
-        threading.Thread(target=tray.run, daemon=True,
-                         name="suprbar-tray").start()
-
     try:
-        run_popup(url, bridge, on_webview_started)
+        tray.run()  # blocks on the main thread until Quit
     except KeyboardInterrupt:
         log.info("interrupted, shutting down")
     except Exception:
-        log.exception("popup loop crashed")
+        log.exception("tray loop crashed")
     finally:
         try:
             httpd.shutdown()
