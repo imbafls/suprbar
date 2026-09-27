@@ -45,4 +45,4 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] Tag v2.0.0, push tag; Release + CI workflows green (fix forward if not) — CI on 7530058 success (test + windows jobs); tag v2.0.0 pushed; Release run 36313490597 success; https://github.com/imbafls/suprbar/releases/tag/v2.0.0 (not draft) with suprbar-setup-2.0.0.exe 18.8 MB, portable zip, SHA256SUMS.txt, latest.json
 
 ## 7. Install
-- [ ] Download + checksum-verify the installer, quit the running app, install silently, `/api/version` = 2.0.0, memory measured
+- [x] Download + checksum-verify the installer, quit the running app, install silently, `/api/version` = 2.0.0, memory measured — gh-downloaded suprbar-setup-2.0.0.exe sha256 8da47075… == SHA256SUMS.txt; v0.16 quit via /api/quit (exited); installer /SILENT exit 0 in 3 s (no -Wait); C:\Program Files\supr.bar\suprbar.exe reports 2.0.0; 1 process, 41 MB private / 58 MB WS idle; config schema 5 with Omer's settings intact; CI green on main head 9015f23
