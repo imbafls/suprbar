@@ -432,15 +432,6 @@ def today_summary() -> dict[str, Any]:
     if not CLAUDE_HOME.exists():
         return _empty_today(started_at, files_scanned)
 
-    # Honor project allow/deny filters from config.
-    try:
-        from . import config as _cfg
-        _allow = set(_cfg.project_allowlist())
-        _deny  = set(_cfg.project_denylist())
-        _anonymize = _cfg.anonymize_projects()
-    except Exception:
-        _allow, _deny, _anonymize = set(), set(), False
-
     # Collect path + stat first so we can decide cached vs. reparse, then
     # parallelize the reparse work.
     with _scan_lock:
@@ -453,11 +444,7 @@ def today_summary() -> dict[str, Any]:
     cutoff_ts = rolling_cutoff_min * 60
     recent: list[tuple[str, float, int]] = []
     newest: tuple[str, float, int] | None = None
-    for key, proj_name, mtime, size in _walk_jsonl():
-        if _allow and proj_name not in _allow:
-            continue
-        if proj_name in _deny:
-            continue
+    for key, _proj, mtime, size in _walk_jsonl():
         files_scanned += 1
         last_file_seen_ts = max(last_file_seen_ts, mtime)
         if newest is None or mtime > newest[1]:
@@ -1170,9 +1157,6 @@ def range_summary(range_key: str = "today",
                   week_starts_on: str = "mon",
                   day_boundary: str = "local",
                   rolling_24h: bool = False,
-                  allowlist: list[str] | None = None,
-                  denylist:  list[str] | None = None,
-                  anonymize: bool = False,
                   include_weekends: bool = True,
                   ) -> dict[str, Any]:
     """Aggregate usage between (start, end) computed from `range_key`.
@@ -1195,8 +1179,6 @@ def range_summary(range_key: str = "today",
     start_utc = start_dt.astimezone(UTC)
     end_utc   = end_dt.astimezone(UTC)
 
-    allow = set(allowlist or [])
-    deny  = set(denylist  or [])
 
     totals = _zero_bucket()
     by_day_acc: dict[str, dict[str, float]] = defaultdict(lambda: {
@@ -1223,10 +1205,6 @@ def range_summary(range_key: str = "today",
     for key, proj, mtime, size in _walk_jsonl():
         files_scanned += 1
         walked.add(key)
-        if allow and proj not in allow:
-            continue
-        if proj in deny:
-            continue
         if mtime < start_ts:
             continue
         paths.append((key, proj, mtime, size))
@@ -1315,11 +1293,9 @@ def range_summary(range_key: str = "today",
     by_model_list = sorted(model_rows, key=lambda x: -float(x["cost"]))
 
     by_project_list = []
-    for proj_index, (p, v) in enumerate(
-            sorted(by_project_acc.items(), key=lambda kv: -kv[1]["cost"]), 1):
-        display = f"project-{proj_index}" if anonymize else p
+    for p, v in sorted(by_project_acc.items(), key=lambda kv: -kv[1]["cost"]):
         by_project_list.append({
-            "project": display,
+            "project": p,
             "cost": round(v["cost"], 4),
             "messages": int(v["messages"]),
             "tokens": int(v["tokens"]),

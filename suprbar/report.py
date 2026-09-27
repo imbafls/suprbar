@@ -225,9 +225,6 @@ def build_report() -> dict[str, Any]:
     now = datetime.now().astimezone()
     today = now.date()
 
-    allow = config.project_allowlist()
-    deny = config.project_denylist()
-    anon = config.anonymize_projects()
     week_starts = _week_starts_on()
 
     # ---- main 30-day window ----
@@ -235,9 +232,6 @@ def build_report() -> dict[str, Any]:
         r = scanner.range_summary(
             "30d",
             week_starts_on=week_starts,
-            allowlist=allow,
-            denylist=deny,
-            anonymize=anon,
         )
     except Exception:
         log.exception("range_summary(30d) failed; emitting empty report")
@@ -285,9 +279,6 @@ def build_report() -> dict[str, Any]:
             custom_start=prev_start.isoformat(),
             custom_end=prev_end.isoformat(),
             week_starts_on=week_starts,
-            allowlist=allow,
-            denylist=deny,
-            anonymize=anon,
         )
         prev_cost = float((prev.get("totals", {}) or {}).get("cost", 0.0) or 0.0)
     except Exception:

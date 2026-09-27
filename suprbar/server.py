@@ -170,15 +170,11 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
     """Return a cached range payload or compute + cache one."""
     cfg = config.load()
     rng = cfg.get("range", {}) or {}
-    proj = cfg.get("projects", {}) or {}
     fp = (
         key,
         custom_start or "",
         custom_end or "",
         rng.get("week_starts_on", "mon"),
-        tuple(proj.get("allowlist") or []),
-        tuple(proj.get("denylist")  or []),
-        bool(proj.get("anonymize", False)),
     )
     cache_key = repr(fp)
     now = _now_monotonic()
@@ -190,9 +186,6 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
         custom_start=custom_start,
         custom_end=custom_end,
         week_starts_on=rng.get("week_starts_on", "mon"),
-        allowlist=list(proj.get("allowlist") or []),
-        denylist=list(proj.get("denylist")  or []),
-        anonymize=bool(proj.get("anonymize", False)),
     )
     _range_cache[cache_key] = {"data": data, "ts": now}
     return data

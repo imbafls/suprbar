@@ -643,18 +643,10 @@ def auto_hide_enabled() -> bool:
     return bool(get_pref("behavior.auto_hide", True))
 
 
-def project_allowlist() -> list[str]:
-    v = get_pref("projects.allowlist", [])
-    return v if isinstance(v, list) else []
 
 
-def project_denylist() -> list[str]:
-    v = get_pref("projects.denylist", [])
-    return v if isinstance(v, list) else []
 
 
-def anonymize_projects() -> bool:
-    return bool(get_pref("projects.anonymize", False))
 
 
 # ---------- Mini overlay accessors ----------

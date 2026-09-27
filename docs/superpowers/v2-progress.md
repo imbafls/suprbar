@@ -17,7 +17,7 @@ One item per loop iteration, in order; tick only with evidence.
 
 ## 3. Implement
 - [x] T1 Remove budgets — scanner.budgets_summary, /api/budgets, tray tint+alerts, report budget card, config.project_limit_map and 3 tests deleted; grep clean outside config schema; report payload builds; gate green (20 passed, ruff, mypy×2)
-- [ ] T2 Remove project filters, anonymize, top-N
+- [x] T2 Remove project filters, anonymize, top-N — params gone from scanner/server/report, config helpers deleted (schema keys go in T5); 7d/30d/90d totals differ from baseline by exactly today's live growth (+8 msgs / +$5.9471 each); gate green
 - [ ] T3 Fixed flyout placement, no click-through
 - [ ] T4 Fixed internals (pricing URL, log level, live threshold, range prefs, cache TTL)
 - [ ] T5 Config schema v5 + migration (tests first)
