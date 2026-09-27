@@ -42,7 +42,7 @@ One item per loop iteration, in order; tick only with evidence.
 
 ## 6. Release
 - [x] Version 2.0.0 in `__init__.py`, `pyproject.toml`, `installer.iss`; commit; push main — all three read 2.0.0, gate green; main pushed (see git log)
-- [ ] Tag v2.0.0, push tag; Release + CI workflows green (fix forward if not)
+- [x] Tag v2.0.0, push tag; Release + CI workflows green (fix forward if not) — CI on 7530058 success (test + windows jobs); tag v2.0.0 pushed; Release run 36313490597 success; https://github.com/imbafls/suprbar/releases/tag/v2.0.0 (not draft) with suprbar-setup-2.0.0.exe 18.8 MB, portable zip, SHA256SUMS.txt, latest.json
 
 ## 7. Install
 - [ ] Download + checksum-verify the installer, quit the running app, install silently, `/api/version` = 2.0.0, memory measured
