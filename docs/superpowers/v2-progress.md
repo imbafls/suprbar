@@ -31,7 +31,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] T13 UI smoke test + dead-code sweep — smoke tests target the new ids (flyout: cost/sub/4 tabs/live/burn/bars; mini: 24h cost, burn, meta), 2 pass; sweep removed 6 provider self_test() + write-only _last_fetch_ts, report display.theme/accent reads, scanner week_starts_on, tray _make_icon/_on_click/_check_source_changed/_source_ids, stale comments (−174 lines, 13 files); re-sweep grep clean; unreferenced-def scan clean (only mini.expand, a JS API); report + tooltip sanity OK; gate green (33 passed)
 
 ## 4. Verify
-- [ ] pytest, ruff, mypy (default + `--platform linux`) green
+- [x] pytest, ruff, mypy (default + `--platform linux`) green — 33 passed (incl. 2 Playwright UI smoke), ruff suprbar+tests clean (5 pre-existing findings only in scripts/, not linted by CI, untouched by v2), mypy ×2 clean, CI extras: pricing self-test OK, import check OK; tray-side imports leave `webview` unloaded
 - [ ] Source run: flyout open/close/toggle/idle-exit, mini on/off, settings changes (harness + tray WM_NOTIFY)
 - [ ] Browser screenshots of flyout, settings, report at 360x480 look right
 - [ ] Numbers match the v0.16 scanner for today / 7d / 30d / 90d
