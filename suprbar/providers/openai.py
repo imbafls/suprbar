@@ -38,7 +38,6 @@ _cache_lock = threading.Lock()
 _cache: dict[str, Any] | None = None
 _cache_ts: float = 0.0
 
-_last_fetch_ts: float = 0.0
 _last_error: str | None = None
 
 
@@ -146,7 +145,7 @@ def _empty_result(error: str | None = None) -> dict[str, Any]:
 
 def today_summary() -> dict[str, Any]:
     """Return today's OpenAI org cost in aggregator source shape."""
-    global _cache, _cache_ts, _last_fetch_ts, _last_error
+    global _cache, _cache_ts, _last_error
 
     with _cache_lock:
         if _cache is not None and (time.time() - _cache_ts) < CACHE_TTL_SECONDS:
@@ -166,7 +165,6 @@ def today_summary() -> dict[str, Any]:
         out["error"] = None
         out["cost_today"] = round(cost, 4)
         out["extras"] = {"buckets": len(raw.get("data", []))}
-        _last_fetch_ts = time.time()
         _last_error = None
     except urllib.error.HTTPError as e:
         try:
@@ -196,18 +194,6 @@ def invalidate_cache() -> None:
     with _cache_lock:
         _cache = None
         _cache_ts = 0.0
-
-
-def self_test() -> dict[str, Any]:
-    age: float | None = None
-    if _last_fetch_ts:
-        age = round(time.time() - _last_fetch_ts, 3)
-    return {
-        "ok": _last_error is None and config.get_source_key("openai") is not None,
-        "last_fetch_age_seconds": age,
-        "last_error": _last_error,
-        "fingerprint": "openai:/v1/organization/costs",
-    }
 
 
 def test_connection(api_key: str) -> tuple[bool, str]:

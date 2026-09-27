@@ -49,8 +49,6 @@ def _db_path() -> Path:
     return Path(base) / "opencode" / "opencode.db"
 
 
-# Diagnostics surface for self_test().
-_last_fetch_ts: float = 0.0
 _last_error: str | None = None
 
 # Tiny result cache — the provider is polled every UI refresh and the
@@ -132,7 +130,7 @@ def today_summary() -> dict[str, Any]:
 
 
 def _compute_today_summary() -> dict[str, Any]:
-    global _last_fetch_ts, _last_error
+    global _last_error
 
     db = _db_path()
     if not db.exists():
@@ -336,8 +334,6 @@ def _compute_today_summary() -> dict[str, Any]:
          "models": sorted(v["models"])}
         for p, v in by_project.items() if v["messages"] > 0]
     by_project_list = sorted(project_rows, key=lambda r: -float(r["cost"]))
-
-    _last_fetch_ts = time.time()
     _last_error = None
 
     out = _empty_result()
@@ -356,16 +352,3 @@ def _compute_today_summary() -> dict[str, Any]:
         "estimated_messages": estimated_msgs,
     }
     return out
-
-
-def self_test() -> dict[str, Any]:
-    """Diagnostics surface for /api/diagnostics."""
-    age: float | None = None
-    if _last_fetch_ts:
-        age = round(time.time() - _last_fetch_ts, 3)
-    return {
-        "ok": _last_error is None and _db_path().exists(),
-        "last_fetch_age_seconds": age,
-        "last_error": _last_error,
-        "fingerprint": str(_db_path()),
-    }

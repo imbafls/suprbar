@@ -138,11 +138,6 @@ def _render(live: bool = False, brighter: bool = False) -> Image.Image:
     return bg
 
 
-def _make_icon() -> Image.Image:
-    """Default idle icon used at startup before the first refresh."""
-    return _render(live=False)
-
-
 # ---------- Tooltip ----------
 
 def _truncate(s: str, n: int) -> str:
@@ -199,12 +194,6 @@ def _format_tooltip(data: dict) -> str:
     return tooltip
 
 
-def _source_ids(data: dict) -> tuple[str, ...]:
-    """Sorted tuple of enabled source IDs for change detection."""
-    src = data.get("sources", []) or []
-    return tuple(sorted(s.get("id", "") for s in src if s.get("ok")))
-
-
 # ---------- TrayApp ----------
 
 class TrayApp:
@@ -213,7 +202,6 @@ class TrayApp:
         self._icon: pystray.Icon | None = None
         self._stop = threading.Event()
         self._last_live: bool | None = None
-        self._last_src_ids: tuple[str, ...] = ()
         # Pre-render both variants once so updates only flip a reference.
         self._idle_icon = _render(live=False)
         self._live_icon = _render(live=True)
@@ -223,9 +211,6 @@ class TrayApp:
 
     # ---- click / menu callbacks ----
 
-    def _on_click(self, icon, item):
-        # Default action (single-click on Windows) + "Open supr.bar" menu item.
-        self.bridge.toggle()
 
     def _on_refresh(self, icon, item):
         server.invalidate_today_cache()
@@ -401,20 +386,10 @@ class TrayApp:
             self._sync_mini()
             if self._icon:
                 self._icon.title = _format_tooltip(data)
-            # Track active sources so we can force a refresh on change.
-            self._last_src_ids = _source_ids(data)
         except Exception as e:
             if self._icon:
                 self._icon.title = f"supr.bar — error: {e!s:.60}"
 
-    def _check_source_changed(self) -> bool:
-        """Peek at the data without invalidating; if source IDs changed,
-        return True so the caller knows to force a refresh."""
-        try:
-            data = server.today_cached()
-            return _source_ids(data) != self._last_src_ids
-        except Exception:
-            return False
 
     def _refresh_loop(self):
         self._update_tooltip()

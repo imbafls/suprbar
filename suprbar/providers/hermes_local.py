@@ -25,7 +25,6 @@ log = logging.getLogger("suprbar.hermes_local")
 
 HERMES_SESSIONS = Path.home() / ".hermes" / "sessions" / "sessions.json"
 
-_last_fetch_ts: float = 0.0
 _last_error: str | None = None
 _cache: dict[str, Any] = {}
 _cache_ts: float = 0.0
@@ -56,13 +55,12 @@ def _load_sessions(force: bool = False) -> dict[str, Any]:
 
 def today_summary() -> dict[str, Any]:
     """Return today's Hermes usage in aggregator source shape."""
-    global _last_fetch_ts, _last_error
+    global _last_error
     now = datetime.now().astimezone()
     today_str = now.date().isoformat()
 
     try:
         sessions = _load_sessions(force=True)
-        _last_fetch_ts = time.time()
         _last_error = None
     except Exception as e:
         _last_error = f"{type(e).__name__}: {e!s:.160}"
@@ -209,17 +207,4 @@ def _empty_source(error: str) -> dict[str, Any]:
         "messages_today": 0,
         "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "extras": {},
-    }
-
-
-def self_test() -> dict[str, Any]:
-    """Lightweight diagnostics for /api/diagnostics."""
-    age: float | None = None
-    if _last_fetch_ts:
-        age = round(time.time() - _last_fetch_ts, 3)
-    return {
-        "ok": _last_error is None and HERMES_SESSIONS.exists(),
-        "last_fetch_age_seconds": age,
-        "last_error": _last_error,
-        "fingerprint": str(HERMES_SESSIONS),
     }

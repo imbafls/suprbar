@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from typing import Any
 
 from .. import scanner
 
-# Module-level diagnostics for self_test(). Populated by today_summary().
-_last_fetch_ts: float = 0.0
 _last_error: str | None = None
 
 
@@ -20,10 +17,9 @@ def today_summary() -> dict[str, Any]:
     projects_today / top_model_today / parse_errors) into ``extras`` so the
     aggregator can reuse them without re-scanning.
     """
-    global _last_fetch_ts, _last_error
+    global _last_error
     try:
         raw = scanner.today_summary()
-        _last_fetch_ts = time.time()
         _last_error = None
     except Exception as e:
         _last_error = f"{type(e).__name__}: {e!s:.160}"
@@ -74,22 +70,4 @@ def today_summary() -> dict[str, Any]:
             "live_sessions": raw.get("live_sessions", []),
             "rolling_24h": raw.get("rolling_24h"),
         },
-    }
-
-
-def self_test() -> dict[str, Any]:
-    """Lightweight diagnostics for /api/diagnostics.
-
-    Returns ``{ok, last_fetch_age_seconds, last_error, fingerprint}`` where
-    fingerprint is a stable identifier for the data source (the resolved
-    ~/.claude/projects path).
-    """
-    age: float | None = None
-    if _last_fetch_ts:
-        age = round(time.time() - _last_fetch_ts, 3)
-    return {
-        "ok": _last_error is None and scanner.CLAUDE_HOME.exists(),
-        "last_fetch_age_seconds": age,
-        "last_error": _last_error,
-        "fingerprint": str(scanner.CLAUDE_HOME),
     }

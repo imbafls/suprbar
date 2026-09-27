@@ -252,7 +252,7 @@ def save(cfg: dict[str, Any]) -> None:
 # ---------- generic dotted-path access ----------
 
 def get_pref(path: str, default: Any = None) -> Any:
-    """Read a nested setting by dotted path, e.g. 'display.theme'."""
+    """Read a nested setting by dotted path, e.g. 'mini.enabled'."""
     cur: Any = load()
     for part in path.split("."):
         if not isinstance(cur, dict) or part not in cur:

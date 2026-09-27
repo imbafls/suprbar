@@ -133,8 +133,6 @@ class OpencodeProviderTest(unittest.TestCase):
         out = opencode.today_summary()
         self.assertTrue(out["ok"])
         self.assertEqual(out["cost_today"], 0.0)
-        st = opencode.self_test()
-        self.assertFalse(st["ok"])  # diagnostics: db really missing
 
     def test_estimate_generic_cost_known_and_unknown(self):
         c = opencode.estimate_generic_cost("gpt-4o", 1_000_000, 0)

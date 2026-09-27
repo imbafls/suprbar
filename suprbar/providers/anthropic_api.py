@@ -45,8 +45,6 @@ _cache_lock = threading.Lock()
 # org) doesn't return stale data from the previous key.
 _cache: dict[str, dict[str, Any]] = {}
 
-# Diagnostics surface for self_test() — observed across all calls.
-_last_fetch_ts: float = 0.0
 _last_error: str | None = None
 
 
@@ -186,7 +184,7 @@ def _fetch_usage_today(api_key: str) -> dict[str, Any]:
 
 def today_summary() -> dict[str, Any]:
     """Fetch today's Admin-API usage + cost, with per-key caching and retry."""
-    global _last_fetch_ts, _last_error
+    global _last_error
 
     base: dict[str, Any] = {
         "id": "anthropic_api",
@@ -228,7 +226,6 @@ def today_summary() -> dict[str, Any]:
             "key_fingerprint": fp,
         }
         base["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-        _last_fetch_ts = now
         _last_error = None
     except urllib.error.HTTPError as e:
         try:
@@ -265,25 +262,6 @@ def invalidate_cache() -> None:
     """Drop all per-key cached responses."""
     with _cache_lock:
         _cache.clear()
-
-
-def self_test() -> dict[str, Any]:
-    """Diagnostics surface for /api/diagnostics.
-
-    ``fingerprint`` is a short hash of the configured admin key (or
-    ``"none"`` when none is set) so callers can correlate cache entries
-    without ever seeing the plaintext key.
-    """
-    age: float | None = None
-    if _last_fetch_ts:
-        age = round(time.time() - _last_fetch_ts, 3)
-    api_key = config.get_admin_key() if config.anthropic_enabled() else None
-    return {
-        "ok": config.anthropic_enabled() and bool(api_key) and _last_error is None,
-        "last_fetch_age_seconds": age,
-        "last_error": _last_error,
-        "fingerprint": _key_fingerprint(api_key or ""),
-    }
 
 
 def test_connection(api_key: str) -> tuple[bool, str]:

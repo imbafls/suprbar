@@ -22,7 +22,7 @@ import socket
 from datetime import datetime, timedelta
 from typing import Any
 
-from . import __version__, config, scanner
+from . import __version__, scanner
 from .pricing import cache_savings_over_models, family_for
 
 log = logging.getLogger("suprbar.report")
@@ -58,26 +58,6 @@ def _parse_day(date_iso: str) -> datetime | None:
         return None
 
 
-
-def _display_theme() -> str:
-    """Report theme honoring the user's ``display.theme``.
-
-    The report stylesheet only ships ``dark`` and ``light`` variants, so the
-    ``auto`` setting (and anything unexpected) collapses to ``dark``.
-    """
-    try:
-        theme = str(config.get_pref("display.theme", "dark") or "dark")
-    except Exception:
-        theme = "dark"
-    return "light" if theme == "light" else "dark"
-
-
-def _display_accent() -> str:
-    """Report accent honoring the user's ``display.accent`` (default ``blue``)."""
-    try:
-        return str(config.get_pref("display.accent", "blue") or "blue")
-    except Exception:
-        return "blue"
 
 
 def _cache_savings(totals: dict[str, Any],
@@ -310,8 +290,8 @@ def build_report() -> dict[str, Any]:
             "machine": _machine_label(),
             "version": "v" + __version__,
             "days": 30,
-            "theme": _display_theme(),
-            "accent": _display_accent(),
+            "theme": "dark",
+            "accent": "blue",
         },
         "byDay": by_day_rows,
         "totals": {

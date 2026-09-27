@@ -429,7 +429,7 @@ body{
 const REPORT = __SUPRBAR_REPORT_JSON__;
 
 /* ---------- apply the user's theme/accent prefs ---------- */
-// The backend emits the user's display.theme / display.accent (defaults
+// The backend emits theme/accent (dark + blue; the switcher is page-local) (defaults
 // dark / blue). Stamp them onto the root dataset so the report opens in the
 // same look as the app; the toolbar derives its "on" states from this below.
 document.documentElement.dataset.theme = REPORT.meta.theme || "dark";

@@ -751,7 +751,6 @@ def _empty_today(started_at: float, files_scanned: int) -> dict[str, Any]:
 def _resolve_range(range_key: str | None,
                    custom_start: str | None = None,
                    custom_end:   str | None = None,
-                   week_starts_on: str = "mon",
                    day_boundary: str = "local",
                    rolling_24h: bool = False,
                    ) -> tuple[datetime, datetime, str]:
@@ -788,12 +787,7 @@ def _resolve_range(range_key: str | None,
         return at_midnight(today - timedelta(days=89)), end, "last 90 days"
     if rk == "week":
         # current calendar week
-        weekday = today.weekday()  # Mon=0..Sun=6
-        if week_starts_on == "sun":
-            offset = (weekday + 1) % 7
-        else:
-            offset = weekday
-        start = at_midnight(today - timedelta(days=offset))
+        start = at_midnight(today - timedelta(days=today.weekday()))  # Monday
         return start, end, "this week"
     if rk == "month":
         start = at_midnight(today.replace(day=1))
@@ -1150,7 +1144,6 @@ def _is_local_midnight(dt: datetime) -> bool:
 def range_summary(range_key: str = "today",
                   custom_start: str | None = None,
                   custom_end:   str | None = None,
-                  week_starts_on: str = "mon",
                   day_boundary: str = "local",
                   rolling_24h: bool = False,
                   include_weekends: bool = True,
@@ -1169,8 +1162,7 @@ def range_summary(range_key: str = "today",
     """
     started_at = time.time()
     start_dt, end_dt, label = _resolve_range(
-        range_key, custom_start, custom_end, week_starts_on,
-        day_boundary, rolling_24h,
+        range_key, custom_start, custom_end, day_boundary, rolling_24h,
     )
     start_utc = start_dt.astimezone(UTC)
     end_utc   = end_dt.astimezone(UTC)

@@ -234,8 +234,7 @@ def today() -> dict[str, Any]:
     scan_source = str(scanner.CLAUDE_HOME)
 
     elapsed_ms = int((time.time() - started) * 1000)
-    # Cache meta from the scanner — same data, surfaced at top level so
-    # /api/diagnostics doesn't have to peek into ``sources[0].extras``.
+    # Cache meta from the scanner, surfaced at top level.
     try:
         scan_meta = scanner.cache_meta()
     except Exception:
