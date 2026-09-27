@@ -33,6 +33,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..scanner import LIVE_WINDOW_SECONDS
+
 from ..pricing import estimate_generic_cost
 
 log = logging.getLogger("suprbar.opencode")
@@ -291,12 +293,8 @@ def _compute_today_summary() -> dict[str, Any]:
     except sqlite3.Error:
         pass
 
-    # Live sessions: activity within the configured threshold.
-    try:
-        from .. import config as _cfg
-        live_window_ms = _cfg.live_threshold_seconds() * 1000
-    except Exception:
-        live_window_ms = 60_000
+    # Live sessions: activity within the same window the scanner uses.
+    live_window_ms = LIVE_WINDOW_SECONDS * 1000
 
     live_sessions: list[dict[str, Any]] = []
     for sid, s in sessions.items():

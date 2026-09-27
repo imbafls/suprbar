@@ -631,18 +631,6 @@ def set_start_on_login(v: bool) -> None:
 
 # ---------- Behavior accessors used by other modules ----------
 
-def live_threshold_seconds() -> int:
-    return int(get_pref("behavior.live_threshold_seconds", 60))
-
-
-def always_on_top() -> bool:
-    return bool(get_pref("behavior.always_on_top", True))
-
-
-def auto_hide_enabled() -> bool:
-    return bool(get_pref("behavior.auto_hide", True))
-
-
 
 
 
@@ -655,17 +643,8 @@ def mini_enabled() -> bool:
     return bool(get_pref("mini.enabled", False))
 
 
-def mini_show_burn() -> bool:
-    return bool(get_pref("mini.show_burn", True))
 
 
-def mini_click_through() -> bool:
-    return bool(get_pref("mini.click_through", False))
-
-
-def pricing_remote_url() -> str:
-    v = get_pref("pricing.remote_url", "")
-    return v if isinstance(v, str) else ""
 
 
 # ---------- Windows "Run on login" registry helper ----------

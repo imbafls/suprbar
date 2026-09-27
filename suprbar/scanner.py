@@ -587,11 +587,7 @@ def today_summary() -> dict[str, Any]:
             }
 
     # Find live sessions: any JSONL touched within the live window.
-    try:
-        from . import config as _cfg
-        live_window = _cfg.live_threshold_seconds()
-    except Exception:
-        live_window = LIVE_WINDOW_SECONDS
+    live_window = LIVE_WINDOW_SECONDS
 
     now_ts = time.time()
     live_sessions: list[dict[str, Any]] = []

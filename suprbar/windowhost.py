@@ -43,7 +43,7 @@ def _setup_logging(kind: str) -> None:
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)
-    level_name = str(config.get_pref("data.log_level", "INFO")).upper()
+    level_name = os.environ.get("SUPRBAR_LOG", "").upper() or "INFO"
     if level_name == "OFF":
         root.setLevel(logging.CRITICAL + 10)
         return

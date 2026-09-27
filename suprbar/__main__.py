@@ -17,13 +17,8 @@ DEFAULT_PORT = 47821
 
 
 def setup_logging() -> None:
-    # Env var wins (debug/dev); otherwise fall back to data.log_level pref.
-    level_name = os.environ.get("SUPRBAR_LOG", "").upper()
-    if not level_name:
-        try:
-            level_name = str(config.get_pref("data.log_level", "INFO")).upper()
-        except Exception:
-            level_name = "INFO"
+    # INFO unless SUPRBAR_LOG overrides it (debugging).
+    level_name = os.environ.get("SUPRBAR_LOG", "").upper() or "INFO"
     if level_name == "OFF":
         level = logging.CRITICAL + 10  # effectively silent
     elif level_name == "WARN":

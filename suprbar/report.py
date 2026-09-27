@@ -58,12 +58,6 @@ def _parse_day(date_iso: str) -> datetime | None:
         return None
 
 
-def _week_starts_on() -> str:
-    try:
-        return str(config.get_pref("range.week_starts_on", "mon") or "mon")
-    except Exception:
-        return "mon"
-
 
 def _display_theme() -> str:
     """Report theme honoring the user's ``display.theme``.
@@ -225,13 +219,11 @@ def build_report() -> dict[str, Any]:
     now = datetime.now().astimezone()
     today = now.date()
 
-    week_starts = _week_starts_on()
 
     # ---- main 30-day window ----
     try:
         r = scanner.range_summary(
             "30d",
-            week_starts_on=week_starts,
         )
     except Exception:
         log.exception("range_summary(30d) failed; emitting empty report")
@@ -278,7 +270,6 @@ def build_report() -> dict[str, Any]:
             "custom",
             custom_start=prev_start.isoformat(),
             custom_end=prev_end.isoformat(),
-            week_starts_on=week_starts,
         )
         prev_cost = float((prev.get("totals", {}) or {}).get("cost", 0.0) or 0.0)
     except Exception:

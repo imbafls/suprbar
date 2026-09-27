@@ -333,7 +333,7 @@ def cache_savings_over_models(
 
 # Rate overrides let new model prices land without shipping a release. Two
 # sources, applied low → high precedence:
-#   1. a hosted JSON table (opt-in via pricing.remote_url, cached 24h)
+#   1. the hosted JSON table at REMOTE_URL (cached 24h)
 #   2. %LOCALAPPDATA%\suprbar\pricing.local.json (always wins)
 #
 # Payload shape (all keys optional):
@@ -344,6 +344,7 @@ def cache_savings_over_models(
 _MAX_RATE = 100_000.0        # USD per 1M tokens; above this is a typo or garbage
 _MAX_REMOTE_BYTES = 512 * 1024
 _REMOTE_TTL_SECONDS = 24 * 3600
+REMOTE_URL = "https://raw.githubusercontent.com/imbafls/suprbar/main/pricing.json"
 _REMOTE_TIMEOUT_SECONDS = 8.0
 
 _remote_lock = threading.Lock()
@@ -495,10 +496,7 @@ def refresh_remote(force: bool = False) -> bool:
     https-only, size-capped, best-effort. Never raises; returns True when a
     fresh table was applied.
     """
-    from . import config
-    url = config.pricing_remote_url()
-    if not url.lower().startswith("https://"):
-        return False
+    url = REMOTE_URL
     if not force:
         age = _cache_age_seconds()
         if age is not None and age < _REMOTE_TTL_SECONDS:

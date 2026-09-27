@@ -73,9 +73,9 @@ _ALLOWED_KEYS: set[str] = {
 _today_cache: dict = {"data": None, "ts": 0.0}
 _TODAY_TTL = 4.0
 # Idle backoff: with no live session there is nothing new to show, so the
-# cache can breathe. A new session still surfaces within this window (or
-# instantly on an explicit refresh / invalidation).
-_TODAY_TTL_IDLE = 30.0
+# cache can breathe — but it must stay under the pages' 30 s idle poll, or a
+# poll can be served a result older than one interval (stale numbers).
+_TODAY_TTL_IDLE = 25.0
 # Single-flight: without this, every HTTP thread + the tray refresh loop can
 # miss the TTL simultaneously and all run a full aggregator scan at once.
 _today_lock = threading.Lock()
@@ -168,14 +168,7 @@ def report_cached() -> dict:
 
 def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> dict:
     """Return a cached range payload or compute + cache one."""
-    cfg = config.load()
-    rng = cfg.get("range", {}) or {}
-    fp = (
-        key,
-        custom_start or "",
-        custom_end or "",
-        rng.get("week_starts_on", "mon"),
-    )
+    fp = (key, custom_start or "", custom_end or "")
     cache_key = repr(fp)
     now = _now_monotonic()
     entry = _range_cache.get(cache_key)
@@ -185,7 +178,6 @@ def range_cached(key: str, custom_start: str | None, custom_end: str | None) -> 
         range_key=key,
         custom_start=custom_start,
         custom_end=custom_end,
-        week_starts_on=rng.get("week_starts_on", "mon"),
     )
     _range_cache[cache_key] = {"data": data, "ts": now}
     return data
@@ -825,10 +817,8 @@ def _startup_command_target() -> str | None:
 
 
 def _range_payload(qs: dict) -> dict:
-    """Build a /api/range response using user range prefs as defaults."""
-    cfg = config.load()
-    rng = cfg.get("range", {})
-    key = (qs.get("key") or [rng.get("default", "today")])[0]
+    """Build a /api/range response (defaults to today)."""
+    key = (qs.get("key") or ["today"])[0]
     cs  = (qs.get("start") or [""])[0] or None
     ce  = (qs.get("end") or [""])[0] or None
     if "refresh" in qs:
