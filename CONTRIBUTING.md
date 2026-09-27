@@ -10,7 +10,6 @@ sources** and bug fixes with reproducers.
 |---|---|---|
 | **New data source** in `suprbar/providers/` | medium | ★★★★★ |
 | **Bug report** with a reproducer JSONL snippet | small | ★★★★ |
-| **New accent / theme** (`config.py` enum + `styles.css` `[data-accent]`) | small | ★★★ |
 | **Docs fix** | tiny | ★★★ |
 | **UI polish** on the usage flyout | medium | ★★ |
 | **Large refactor** | large | ★ (open an issue first) |
@@ -47,7 +46,7 @@ register in `aggregator.py`, add a config toggle.
 
 ## Commit + PR conventions
 
-- Branch: `source/<id>`, `theme/<name>`, `fix/<short>`, `docs/<short>`.
+- Branch: `source/<id>`, `fix/<short>`, `docs/<short>`.
 - Commit subject: imperative, ≤ 72 chars.
 - One logical change per PR; squash on merge.
 - Screenshot for visible UI changes.

@@ -4,11 +4,11 @@
 
 # supr.bar
 
-**API usage in your tray.**
+**What your coding agents cost, in your tray.**
 
-A Windows 11 tray companion that reads your local Claude Code sessions (and
-optional Anthropic Admin API data) and shows spend, limits, and burn rate in a
-small flyout — CodexBar-style, local-first.
+A small Windows 11 tray app that reads your local Claude Code sessions (plus
+opencode, Hermes and optional API accounts) and shows today's spend, your live
+burn rate and where the money went — local-first.
 
 No login. No telemetry. Your data stays on your machine.
 
@@ -16,38 +16,31 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v0.16 — **light**: ~27 MB idle. The flyout and mini overlay
-> run as short-lived WebView2 child processes, and range tabs are served from
-> a per-day index instead of re-reading your whole history.
+> **Status:** v2.0 — trimmed and stable. Five settings, a six-item tray menu,
+> ~40 MB and one process while the flyout is closed.
 
 ## What it does
 
-- Reads `~/.claude/projects/**/*.jsonl` — no API key required for local mode.
-- Reads the **opencode** SQLite database (`~/.local/share/opencode/opencode.db`)
-  for sessions from opencode, including per-model costs.
-- Optional **Anthropic Admin API** for org-wide actual spend (Settings → Sources).
-- Optional **Hermes** agent sessions (`~/.hermes/sessions/sessions.json`).
-- **Range filters** — today, 24h, 7d, week, month, 30d, 90d.
-- **Mini overlay** — an always-on-top chip showing **rolling 24h** (or today)
-  spend, live dot, and burn $/h. Hover to expand it into a detail card (live
-  session, messages, budget bar); click the cost to open the flyout; drag to
-  move; optionally click-through. Toggle from the tray menu or Settings.
-- **Budgets** — daily / weekly / monthly limits plus **per-project daily
-  caps**, with tray warnings and system notifications when a line is crossed.
-- **Per-source breakdown** — local Claude Code, opencode, Hermes, Admin API
-  (more sources planned).
-- Live session indicator, burn rate, cache stats, top projects.
-- **By model** cost breakdown across all sources in the Details fold.
-- **Editable pricing** — override rates locally (`pricing.local.json`) or let
-  supr.bar refresh the hosted rate table daily, so new models price correctly
-  without waiting for a release.
+- **Today at a glance** — cost, messages, tokens, and while a session is live,
+  its burn rate ($/h) and project.
+- **Ranges** — Today · 7d · 30d · 90d, with hourly or daily bars.
+- **Where it went** — top projects and top models for the range.
+- **Sources** — Claude Code (`~/.claude/projects/**/*.jsonl`, no key needed),
+  opencode (its SQLite db), Hermes (`~/.hermes/sessions/sessions.json`), and
+  optional API accounts: Anthropic Admin, OpenRouter, OpenAI. Each source gets
+  a chip with its cost; a source that fails shows `!` and its error instead of
+  a silent $0.00.
+- **Mini overlay** — an always-on-top chip with the last 24h, live dot and
+  $/h. Hover for details, click for the flyout, × to turn it off.
+- **30-day report** — a full-page report in your browser (tray menu or the
+  flyout's Report button).
 
 ## Install
 
 ### From release (recommended)
 
-Download the latest `suprbar-setup.exe` from
-[Releases](https://github.com/imbafls/suprbar/releases), run it, done.
+Download `suprbar-setup-<version>.exe` from
+[Releases](https://github.com/imbafls/suprbar/releases) and run it.
 
 ### From source
 
@@ -58,83 +51,80 @@ pip install -r requirements.txt
 python -m suprbar
 ```
 
-Requires Python 3.11+, Windows 11, and WebView2 (preinstalled on Win11).
+Requires Python 3.11+, Windows 11 and WebView2 (preinstalled on Windows 11).
 
-## Quick start
+## Using it
 
-1. Launch suprbar — gradient **S** in the system tray.
-2. Open Claude Code and start a session.
-3. Click the tray icon for the flyout (cost, tokens, burn, budgets). Drag the
-   bottom-right grip to resize it — the size sticks.
-4. Right-click → **Mini overlay** for the always-on-top chip (24h by default;
-   hover it to expand, click the cost for the full flyout).
-5. Right-click → **Settings** for refresh, theme, sources, budgets.
-6. Set daily/weekly/monthly limits under **Budgets** if you want warnings
-   (per-project caps: `project=amount` entries in the same section).
+- **Click the tray icon** to open or close the flyout. It opens at the
+  bottom-right of the screen you're on and hides when you click elsewhere —
+  unless you pin it (the pin button, or **middle-click** the tray icon).
+- **Right-click the tray icon** for: Open supr.bar · Mini overlay · Refresh ·
+  30-day report · Settings… · Quit.
+- **Settings** (gear in the flyout) — that's all of them:
+
+  | Setting | What it does |
+  |---|---|
+  | Sources | Turn each source on or off; paste, test or clear API keys |
+  | Mini overlay | Show the always-on-top 24h chip |
+  | Keep flyout open | Don't hide the flyout when you click elsewhere |
+  | Start on login | Launch supr.bar when you sign in |
+  | Check for updates | Look for a new release at launch and every 6 hours |
+
+  Every change applies immediately.
 
 ## Updating
 
-supr.bar updates itself — there's no separate updater to run.
+supr.bar updates itself. When a release is out you get an **Update to vX**
+button in the flyout and an item in the tray menu. The installer is downloaded
+from the GitHub release, checked (HTTPS + host allowlist, installer name, the
+release's SHA-256, a size ceiling), run silently, and supr.bar restarts into
+the new version; any failure leaves your install untouched. Turn off **Check
+for updates** and supr.bar never checks on its own. Source checkouts never
+auto-update — use `git pull`.
 
-- **Automatic check.** Once per launch, in the background, supr.bar asks GitHub
-  for the latest release. If a newer one exists you get an **Update available**
-  banner in the flyout, a tray notification, and an **Update to vX…** item in the
-  tray menu. You can also check on demand: **Updates** in the flyout footer,
-  **Check now** under Settings → About, or **Check for updates** in the tray menu.
-- **One-click install.** Click **Update** and supr.bar downloads the installer
-  asset from the GitHub release, verifies it (HTTPS + host allowlist,
-  installer-name allowlist, SHA-256 against the release digest, size ceiling),
-  runs it silently, and restarts into the new version. Any failure aborts cleanly
-  and leaves your current install untouched.
-- **Opt out.** Don't want the launch-time check? Turn off **Settings → Updates →
-  Check on launch** (`updates.check_on_launch`). supr.bar then never reaches out
-  on its own — manual checks still work.
-- **Local-first, no telemetry.** Two optional unauthenticated `GET`s exist:
-  the latest-release version check, and the hosted pricing table (daily, so new
-  model rates land without a release — clear **Settings → Pricing → URL** to
-  disable it). Neither sends an account, token, or anything about you.
-  supr.bar has no server and binds no port; everything stays on your machine.
-- **Not code-signed (yet).** This build isn't code-signed, so Windows
-  **SmartScreen may warn** when the installer runs. That's expected — choose
-  **More info → Run anyway**. Running from a source checkout never auto-updates;
-  update it with `git pull` instead.
+The installer isn't code-signed yet, so SmartScreen may warn: **More info →
+Run anyway**.
+
+## Privacy
+
+Everything is read locally. supr.bar serves its pages from `127.0.0.1` only.
+It makes two unauthenticated requests of its own: the release check above
+(unless you turn it off) and the hosted pricing table (daily, so new models
+price correctly without a release). API sources you turn on talk to their
+provider with the key you gave them. Keys are stored DPAPI-encrypted.
+
+## How it stays light
+
+- The tray process never loads WebView2. The flyout runs in its own process,
+  started when you open it and ended a minute after you close it; the mini
+  overlay's process exists only while it's on.
+- Nothing polls while the flyout is hidden.
+- The today scan only opens session files written in the last 25 hours, and
+  range tabs read a per-day index (`%LOCALAPPDATA%\suprbar\scan-index.json`),
+  so a large history is parsed once, not on every click.
 
 ## Architecture
 
 ```
-~/.claude/projects/*.jsonl          ~/.local/share/opencode/opencode.db
-~/.hermes/sessions/sessions.json    Anthropic Admin API (optional)
-        │                                      │
-        ▼                                      ▼
- ┌─────────────┐  ┌──────────────────┐  ┌──────────────────────┐
- │ providers/  │  │  providers/      │  │  providers/          │
- │ local.py    │  │  opencode.py     │  │  hermes_local.py     │
- │             │  │                  │  │  anthropic_api.py    │
- └──────┬──────┘  └────────┬─────────┘  └──────────┬───────────┘
-        └──────────────────┴───────────┬───────────┘
-                                       ▼
-                              ┌─────────────────┐
-                              │  aggregator.py  │  merge sources → /api/today
-                              └────────┬────────┘
-                                       ▼
-                              ┌─────────────────┐
-                              │  WebView2 popup │  cost hero + range tabs + budgets
-                              └─────────────────┘
+~/.claude/projects/*.jsonl   opencode.db   ~/.hermes/…   API accounts
+          │                      │              │              │
+          ▼                      ▼              ▼              ▼
+      scanner.py ──► providers/local.py, opencode.py, hermes_local.py, …
+                                   │
+                                   ▼
+                            aggregator.py ──► server.py (127.0.0.1)
+                                                   │
+                  tray.py ── windows.py ──► flyout / mini child processes
+                                             (windowhost.py → WebView2)
 ```
 
-Adding a new AI/tool = implement a provider in `suprbar/providers/` and
-register it in `aggregator.py`. See [`docs/extending.md`](./docs/extending.md).
-
-## Roadmap (high-level)
-
-- **v0.10** _(this release)_ — in-app auto-update (background + manual check, one-click install from GitHub, opt-out)
-- **next** — Cursor / Codex CLI local log providers; unified multi-source totals + per-source filters; code-signed installer (drop the SmartScreen warning)
-- **v1.0** — macOS + Linux tray ports
+A new data source is a provider in `suprbar/providers/`, registered in
+`aggregator.py`. See [`docs/extending.md`](./docs/extending.md).
 
 ## Contributing
 
-PRs welcome: new **data sources**, themes, bug fixes, docs.
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+PRs welcome — new data sources, bug fixes, docs. See
+[`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## License
 

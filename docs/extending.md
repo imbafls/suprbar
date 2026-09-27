@@ -4,8 +4,7 @@ supr.bar is a **usage bar** — tray flyout + local data sources. Extension
 points are intentionally small:
 
 1. **Data sources** — plug in Cursor, Codex CLI, OpenAI, etc.
-2. **Themes / accents** — CSS variable overrides via `[data-theme]` / `[data-accent]` in `styles.css`.
-3. **Tray menu actions** — optional HTTP-backed menu items (future).
+2. **Tray menu actions** — optional HTTP-backed menu items (future).
 
 ---
 
@@ -50,22 +49,12 @@ your scanner adapter or reuse patterns from `suprbar/scanner.py`.
 
 ---
 
-## 2. Themes & accents
+## 2. Look and feel
 
-There is no separate theme-file loader. Light/dark live in `styles.css` under
-`[data-theme="light"]`, and the accent palette under `body[data-accent="…"]`.
-To add an accent:
-
-1. Add the name to the `display.accent` enum in `config.py` `SCHEMA`.
-2. Add a matching block in `suprbar/static/styles.css`:
-
-```css
-body[data-accent="ocean"] {
-  --b-accent: #38bdf8; --b-accent-hot: #7dd3fc; --b-violet: #6366f1;
-}
-```
-
-It then appears as a swatch under Settings → Display → Accent color.
+v2 ships one look: the dark tokens and the indigo accent at the top of
+`suprbar/static/styles.css` (the mini overlay reuses them). There are no
+theme or accent settings; change the tokens there if you want a different
+palette in your build.
 
 ---
 

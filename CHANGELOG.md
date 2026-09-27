@@ -1,5 +1,50 @@
 # supr.bar CHANGELOG
 
+## v2.0.0 — trimmed and stable
+
+supr.bar v2 is smaller on purpose: five settings, a six-item tray menu and a
+rewritten flyout (362 lines of script instead of 2,677), built around what the
+app is for — what your coding agents cost today, over the last 7 / 30 / 90
+days, and where it went.
+
+**Kept:** today's cost with the live dot and $/h, range tabs, projects and
+models, all sources (Claude Code, opencode, Hermes, Anthropic Admin /
+OpenRouter / OpenAI keys), the mini overlay, the 30-day report, auto-update.
+
+**Settings (5):** sources + API keys, mini overlay, keep flyout open, start on
+login, check for updates. Each applies the moment you flip it. Your existing
+config migrates automatically — sources, keys, overlay, pin and login carry
+over; turning auto-hide off in v0.x becomes "keep flyout open".
+
+**Removed:** budgets (limits, alerts, tray tint, per-project caps), CSV export,
+copy summary, config export / import / reset, the diagnostics panel, the
+shortcuts overlay, the right-click menu, click-through (flyout and overlay),
+confirm-quit, theme / accent / density / font / animation / cost-format
+options, project allow / deny / anonymize / top-N, the pricing URL, default
+range, week start, live threshold, log level, always-on-top and refresh
+interval settings, flyout drag and resize, and the 24h / week / month tabs
+(24h lives on the mini overlay; the report covers calendar months).
+
+**Fixed:**
+- The flyout could open partly off-screen on scaled displays (it mixed
+  logical and physical pixels) or at a saved position on a monitor that was
+  gone. It now always opens at the bottom-right of the screen you're on.
+- A cold flyout flashed an empty dark window before its page loaded; it now
+  appears once the page is ready.
+- A failed source showed $0.00; it now shows `!` with the error.
+- The idle data cache could outlive the idle poll and serve a stale number.
+- Quit could hang; it now stops both windows in parallel and a watchdog
+  guarantees the process exits within 6 seconds.
+- Tray double-click opened and immediately closed the flyout, and
+  middle-click (pin) did nothing — pystray never called the handlers.
+- Turning the overlay off right after turning it on logged a WebView2 error.
+- The server could abort a connection instead of answering 403/404 to a
+  POST, because it didn't read the request body first.
+- The report scrolled sideways on narrow windows and its title always said
+  "May 2026".
+
+Numbers are unchanged: today / 7d / 30d / 90d match v0.16 to the cent.
+
 ## v0.16.0 — light: ~27 MB when idle instead of ~390 MB
 
 - **The tray process no longer loads WebView2.** The flyout runs in its own

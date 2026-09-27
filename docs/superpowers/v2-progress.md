@@ -38,7 +38,7 @@ One item per loop iteration, in order; tick only with evidence.
 - [x] Idle memory (1 process, <= ~55 MB) and flyout-open memory measured; no errors in logs — frozen v2 build: idle 1 proc 40 MB private / 58 WS; after 7d/30d/90d+report 51/69; flyout open 8 procs 279/499 (v0.16: 320-400); flyout exits 62 s after close → 51/69; quit rc 0. Logs: found + fixed a pywebview ERROR when the overlay was closed mid-WebView2-init (repro 3/3 → 0/3: exit waits ≤3 s for load); also fixed a flaky test that exposed a server bug (early 403/404 on POST didn't drain the body → connection abort ~1/10; now 0/30). suprbar/flyout logs 0 ERROR lines
 
 ## 5. Docs
-- [ ] README (features, status v2.0), CHANGELOG v2.0.0, memory file updated if the model changed
+- [x] README (features, status v2.0), CHANGELOG v2.0.0, memory file updated if the model changed — README rewritten (features, the 5 settings, tray menu, updating, privacy incl. the corrected 127.0.0.1 note, how it stays light, architecture); stale theme sections dropped from docs/extending.md + CONTRIBUTING.md; CHANGELOG v2.0.0 lists kept/settings/removed/10 fixes/number parity; memory file + MEMORY.md index updated for v2
 
 ## 6. Release
 - [ ] Version 2.0.0 in `__init__.py`, `pyproject.toml`, `installer.iss`; commit; push main
