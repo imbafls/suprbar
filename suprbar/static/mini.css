@@ -1,176 +1,50 @@
-/* ============================================================================
-   supr.bar — mini overlay (always-on-top HUD)
-   Reuses styles.css tokens. The window is frameless + opaque; DWM rounds the
-   HWND, CSS rounds the body to match. Whole surface drags (easy_drag) except
-   interactive controls, which are -webkit-app-region: no-drag.
-
-   Two layouts, swapped by body.expanded (driven from JS on hover, with the
-   native window growing via pywebview):
-     .m-compact  — 176x44 chip: pip · cost · range tag · burn · ×
-     .m-full     — 208x118 card: live line, big cost, range chips, meta, budget
-   ========================================================================== */
+/* supr.bar mini overlay — styles.css tokens + the chip / card layouts.
+   The window is frameless; the whole surface drags except the controls.
+     .m-chip  176 x 44   dot · 24h cost · $/h · ×
+     .m-card  208 x 118  live line, big cost, meta (shown while hovered)   */
 
 body.mini {
-  padding: 0;
   background: var(--b-surface);
   border: 1px solid var(--b-line-2);
   border-radius: 10px;
   -webkit-app-region: drag;
-  app-region: drag;
-  user-select: none;
   cursor: grab;
-  overflow: hidden;
 }
-body.mini:active { cursor: grabbing; }
 
-/* live pip — dim when idle, green + soft pulse while a session is active */
-body.mini .pip {
-  width: 7px; height: 7px; flex: none;
-  border-radius: 50%;
+.mini .pip {
+  width: 7px; height: 7px; flex: none; border-radius: 50%;
   background: var(--b-faint);
-  transition: background var(--dur);
-  margin: 0 1px 0 0;
 }
-body.mini.live .pip {
+.mini.live .pip {
   background: var(--b-success);
   box-shadow: 0 0 0 3px var(--b-success-soft);
-  animation: mini-pulse 2.4s ease-in-out infinite;
+  animation: pulse 2.4s ease-in-out infinite;
 }
-@keyframes mini-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
-}
-body.mini.no-animations .pip { animation: none !important; }
+@keyframes pulse { 50% { opacity: .45; } }
 
-/* shared controls */
-body.mini .cost {
-  all: unset;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  cursor: pointer;
-  border-radius: 5px;
+.mini .open, .mini .x { -webkit-app-region: no-drag; cursor: pointer; }
+.mini .open { font-weight: 600; letter-spacing: -.015em; border-radius: 5px; }
+.mini .x {
+  display: grid; place-items: center; width: 18px; height: 18px; flex: none;
+  border-radius: 5px; font-size: 13px; color: var(--b-dimmer);
+  opacity: 0; transition: opacity var(--dur);
 }
-body.mini .cost:focus-visible { outline: var(--b-ring); }
-body.mini .cost .num {
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--b-text);
-  font-variant-numeric: tabular-nums;
-}
-body.mini .range {
-  all: unset;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  cursor: pointer;
-  font-size: 9.5px;
-  line-height: 1;
-  color: var(--b-dimmer);
-  border: 1px solid var(--b-line);
-  border-radius: 4px;
-  padding: 2px 4px;
-  white-space: nowrap;
-}
-body.mini .range:hover { color: var(--b-dim); border-color: var(--b-line-2); }
-body.mini .range:focus-visible { outline: var(--b-ring); }
-body.mini .range.on {
-  color: var(--b-accent-hot);
-  border-color: var(--b-accent-line);
-  background: var(--b-accent-ghost);
-}
-body.mini .x {
-  all: unset;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  flex: none;
-  width: 18px; height: 18px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  font-size: 13px;
-  line-height: 1;
-  color: var(--b-dimmer);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--dur), background var(--dur), color var(--dur);
-}
-body.mini:hover .x { opacity: 1; }
-body.mini.expanded .x { opacity: 1; }
-body.mini .x:hover { background: var(--b-surface-3); color: var(--b-text); }
-body.mini .x:focus-visible { outline: var(--b-ring); opacity: 1; }
+.mini:hover .x { opacity: 1; }
+.mini .x:hover { background: var(--b-surface-3); color: var(--b-text); }
 
-/* ---- compact chip ---- */
-.m-compact {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 100%;
-  padding: 0 7px 0 12px;
-}
-body.mini.expanded .m-compact { display: none; }
-.m-compact .cost .num { font-size: 15px; }
-.m-compact .burn {
-  font-size: 10.5px;
-  color: var(--b-dim);
-  white-space: nowrap;
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
+.m-chip { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 7px 0 12px; }
+.m-chip .open { font-size: 15px; }
+.m-chip .burn { margin-left: auto; font-size: 10.5px; color: var(--b-dim); white-space: nowrap; }
 
-/* ---- expanded card ---- */
-.m-full {
-  display: none;
-  flex-direction: column;
-  gap: 5px;
-  height: 100%;
-  padding: 8px 9px 9px 12px;
+.m-card { display: none; flex-direction: column; gap: 3px; height: 100%; padding: 8px 9px 9px 12px; }
+.m-card .top { display: flex; align-items: center; gap: 7px; }
+.m-card .what {
+  flex: 1; min-width: 0; font-size: 10px; color: var(--b-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-body.mini.expanded .m-full { display: flex; }
-.m-full .top { display: flex; align-items: center; gap: 7px; }
-.m-full .top .live {
-  flex: 1;
-  min-width: 0;
-  font-size: 10px;
-  color: var(--b-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.m-full .costrow { display: flex; align-items: baseline; gap: 6px; }
-.m-full .costrow .cost { margin-right: auto; }
-.m-full .costrow .cost .num { font-size: 22px; }
-.m-full .meta {
-  display: flex;
-  gap: 6px;
-  font-size: 10.5px;
-  color: var(--b-dim);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.m-full .budget { display: flex; align-items: center; gap: 7px; }
-.m-full .budget .bar {
-  flex: 1;
-  height: 4px;
-  border-radius: 3px;
-  background: var(--b-surface-3);
-  overflow: hidden;
-}
-.m-full .budget .bar span {
-  display: block;
-  height: 100%;
-  width: 0%;
-  border-radius: 3px;
-  background: var(--b-accent);
-  transition: width var(--dur);
-}
-.m-full .budget .bar span.warn { background: var(--b-warn); }
-.m-full .budget .bar span.over { background: var(--b-danger); }
-.m-full .budget .txt {
-  font-size: 10px;
-  color: var(--b-dim);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
+.m-card .big { align-self: flex-start; font-size: 22px; }
+.m-card .meta { font-size: 10.5px; color: var(--b-dim); white-space: nowrap; overflow: hidden; }
 
-/* server unreachable — dim the whole chip */
-body.mini.offline { opacity: 0.55; }
+.mini.expanded .m-chip { display: none; }
+.mini.expanded .m-card { display: flex; }
+.mini.offline { opacity: .55; }

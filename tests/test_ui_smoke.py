@@ -199,10 +199,11 @@ class UiSmokeTest(unittest.TestCase):
             browser = self._launch(pw)
             try:
                 page, errors = self._open(browser, "/mini.html", 176, 44)
-                # Defaults to the rolling 24h range (server-cached /api/range).
+                # The chip shows the rolling 24h cost from /api/today.
                 self._wait_text(page, "#cCost", "1,650")
-                self.assertEqual(page.text_content("#cRange").strip(), "24h")
                 self.assertIn("1,650", page.text_content("#fCost"))
+                self.assertIn("/h", page.text_content("#cBurn"))
+                self.assertIn("last 24h", page.text_content("#fMeta"))
                 self.assertIn("live", page.get_attribute("body", "class") or "")
                 self.assertEqual(errors, [])
             finally:
