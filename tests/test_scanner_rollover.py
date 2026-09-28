@@ -142,6 +142,42 @@ class IndexMatchesExactScanTest(_TempHome):
             {p["project"]: round(p["cost"], 6) for p in exact["by_project"]})
         self.assertEqual(indexed["totals"]["messages"], 14)  # 7 days x 2 files
 
+    def test_appended_records_extend_the_index(self):
+        today = datetime.now().astimezone().replace(
+            hour=12, minute=0, second=0, microsecond=0)
+        p = self.write("C--work--app/live.jsonl",
+                       [_rec(today - timedelta(days=d), "s1",
+                             "claude-sonnet-4-6", 100_000) for d in (2, 3)],
+                       today - timedelta(days=2))
+        end = today.replace(hour=0) + timedelta(days=1)
+        start = end - timedelta(days=7)
+        window = {"custom_start": start.isoformat(), "custom_end": end.isoformat()}
+        first = scanner.range_summary("custom", **window)
+        self.assertEqual(first["totals"]["messages"], 2)
+        # The session keeps writing; only the new bytes should be read.
+        with p.open("a", encoding="utf-8") as f:
+            f.write(_rec(today - timedelta(days=1), "s1",
+                         "claude-opus-4-7", 300_000) + "\n")
+        os.utime(p, ((today - timedelta(days=1)).timestamp(),) * 2)
+        with mock.patch.object(scanner, "_index_file",
+                               wraps=scanner._index_file) as spy:
+            second = scanner.range_summary("custom", **window)
+        self.assertEqual(spy.call_args.args[3]["o"] > 0, True)  # tail, not rebuild
+        exact = scanner.range_summary(
+            "custom", custom_start=(start - timedelta(seconds=1)).isoformat(),
+            custom_end=end.isoformat())
+        self.assertEqual(second["totals"]["messages"], 3)
+        self.assertAlmostEqual(second["totals"]["cost"], exact["totals"]["cost"],
+                               places=6)
+        # Survives a save/reload round trip (the index lives on disk too).
+        with scanner._index_lock:
+            scanner._index_save(force=True)
+        scanner._index.clear()
+        scanner._index_loaded = False
+        third = scanner.range_summary("custom", **window)
+        self.assertAlmostEqual(third["totals"]["cost"], second["totals"]["cost"],
+                               places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

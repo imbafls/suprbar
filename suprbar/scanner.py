@@ -913,15 +913,21 @@ def _range_scan_one_file(path: Path, proj: str,
 # query time keeps the index valid across pricing-table updates. The index
 # is saved to disk so a restart doesn't pay for the full history again.
 #
-# path -> {"m": mtime, "s": size, "o": byte offset folded so far,
+# In memory (and on disk) each file is (mtime, size, entry-as-JSON-string);
+# the entry is only parsed while a query uses it. Holding thousands of
+# entries as live dicts/lists cost ~14 MB that Python's allocator never gave
+# back to Windows even after the dicts were dropped; one string per file
+# costs a fraction of that and parsed entries are freed right after use.
+#
+# entry = {"m": mtime, "s": size, "o": byte offset folded so far,
 #          "e": parse errors, "d": {date: {model: [msgs, in, out, c5, c1, cr]}},
 #          "sid": {date: [session ids]}}
 
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
 _INDEX_SAVE_INTERVAL = 300.0
 _INDEX_BULK = 20  # newly indexed files that make a save immediate
 _index_lock = threading.Lock()
-_index: dict[str, dict[str, Any]] = {}
+_index: dict[str, tuple[float, int, str]] = {}
 _index_loaded = False
 _index_dirty = False
 _index_saved_at = 0.0
@@ -953,7 +959,9 @@ def _index_load() -> None:
     if (isinstance(raw, dict) and raw.get("v") == _INDEX_VERSION
             and raw.get("tz") == _tz_key()
             and isinstance(raw.get("files"), dict)):
-        _index.update(raw["files"])
+        for key, rec in raw["files"].items():
+            if isinstance(rec, list) and len(rec) == 3:
+                _index[key] = (rec[0], rec[1], rec[2])
 
 
 def _index_save(force: bool = False) -> None:
@@ -974,7 +982,8 @@ def _index_save(force: bool = False) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(
-            {"v": _INDEX_VERSION, "tz": _tz_key(), "files": _index},
+            {"v": _INDEX_VERSION, "tz": _tz_key(),
+             "files": {k: list(v) for k, v in _index.items()}},
             separators=(",", ":")), encoding="utf-8")
         os.replace(tmp, path)
         _index_dirty = False
@@ -1047,28 +1056,32 @@ def _index_file(path: str, mtime: float, size: int,
 
 
 def _index_refresh(paths: list[tuple[str, str, float, int]],
-                   walked: set[str]) -> dict[str, dict[str, Any]]:
-    """Bring the index entries for ``paths`` up to date; return them."""
+                   walked: set[str]) -> dict[str, str]:
+    """Bring the index entries for ``paths`` up to date.
+
+    Returns path -> entry JSON; callers parse one entry at a time.
+    """
     global _index_dirty
     with _index_lock:
         _index_load()
         todo = []
         for key, _proj, mtime, size in paths:
             e = _index.get(key)
-            if not (e and e.get("m") == mtime and e.get("s") == size):
-                todo.append((key, mtime, size, e))
+            if not (e and e[0] == mtime and e[1] == size):
+                todo.append((key, mtime, size, e[2] if e else None))
     if todo:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
-            futs = {ex.submit(_index_file, k, m, s, e): k
+            futs = {ex.submit(_index_file, k, m, s,
+                              json.loads(e) if e else None): (k, m, s)
                     for (k, m, s, e) in todo}
-            fresh = {}
-            for fut, k in futs.items():
+            fresh: dict[str, tuple[float, int, str]] = {}
+            for fut, (k, m, s) in futs.items():
                 try:
                     entry = fut.result()
                 except Exception:
                     entry = None
                 if entry is not None:
-                    fresh[k] = entry
+                    fresh[k] = (m, s, json.dumps(entry, separators=(",", ":")))
     else:
         fresh = {}
     with _index_lock:
@@ -1079,7 +1092,7 @@ def _index_refresh(paths: list[tuple[str, str, float, int]],
             del _index[gone]
             _index_dirty = True
         _index_save(force=len(fresh) > _INDEX_BULK)
-        return {k: _index[k] for k, _p, _m, _s in paths if k in _index}
+        return {k: _index[k][2] for k, _p, _m, _s in paths if k in _index}
 
 
 def _index_partial(entry: dict[str, Any], proj: str, first_day, last_day,
@@ -1243,7 +1256,8 @@ def range_summary(range_key: str = "today",
         for key, proj, _m, _s in paths:
             entry = entries.get(key)
             if entry:
-                _merge_partial(_index_partial(entry, proj, first_day, last_day,
+                _merge_partial(_index_partial(json.loads(entry), proj,
+                                              first_day, last_day,
                                               include_weekends))
     elif paths:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
