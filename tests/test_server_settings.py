@@ -35,6 +35,8 @@ class SettingsApiTest(unittest.TestCase):
             mock.patch.object(config, "_dpapi_protect", side_effect=_fake_protect),
             mock.patch.object(config, "_dpapi_unprotect",
                               side_effect=_fake_unprotect),
+            mock.patch.object(config, "startup_registered",
+                              side_effect=lambda default=False: default),
             mock.patch.object(config, "apply_startup_setting",
                               side_effect=lambda v, *_a: cls.startup_calls.append(v)
                               or True),

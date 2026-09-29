@@ -196,6 +196,24 @@ def _format_tooltip(data: dict) -> str:
 
 # ---------- TrayApp ----------
 
+def _off_ui(fn):
+    """Run a tray callback on a worker thread.
+
+    pystray calls menu/click handlers on its Win32 message loop; anything that
+    blocks there (starting or waiting on a window child, a scan, a browser
+    launch) freezes the icon and Windows reports the app as hung.
+    """
+    def wrapper(self, icon=None, item=None):
+        def run():
+            try:
+                fn(self, icon, item)
+            except Exception:
+                log.exception("tray action %s failed", fn.__name__)
+        threading.Thread(target=run, daemon=True,
+                         name=f"suprbar-{fn.__name__}").start()
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
 class TrayApp:
     def __init__(self, bridge: FlyoutController):
         self.bridge = bridge
@@ -212,11 +230,13 @@ class TrayApp:
     # ---- click / menu callbacks ----
 
 
+    @_off_ui
     def _on_refresh(self, icon, item):
         server.invalidate_today_cache()
         self._pulse_icon()
         self._update_tooltip()
 
+    @_off_ui
     def _on_report(self, icon, item):
         try:
             server.open_report_in_browser()
@@ -225,6 +245,7 @@ class TrayApp:
 
 
 
+    @_off_ui
     def _on_settings(self, icon, item):
         try:
             self.bridge.open_with_settings()
@@ -277,6 +298,7 @@ class TrayApp:
 
     # ---- pystray default-item compatibility for double-click ----
 
+    @_off_ui
     def _on_default(self, icon, item):
         # Bound through MenuItem(..., default=True). pystray on Windows fires
         # this on left single-click; we also bind via _on_notify below so
@@ -301,6 +323,7 @@ class TrayApp:
 
     # ---- mini overlay menu callbacks ----
 
+    @_off_ui
     def _on_mini_toggle(self, icon, item):
         try:
             mini = self.bridge.mini

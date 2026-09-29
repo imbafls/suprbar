@@ -582,8 +582,14 @@ def _settings_payload() -> dict:
     for source in _KEY_TESTERS:
         k = _stored_key(source)
         keys[source] = _fingerprint(k) if k else ""
+    settings = {p: config.get_pref(p) for p in _USER_SETTINGS}
+    if "ui.start_on_login" in settings:
+        # The installer's "start on login" task writes the Run value without
+        # touching config; report what Windows will actually do.
+        settings["ui.start_on_login"] = config.startup_registered(
+            bool(settings["ui.start_on_login"]))
     return {
-        "settings": {p: config.get_pref(p) for p in _USER_SETTINGS},
+        "settings": settings,
         "keys": keys,
         "version": __version__,
     }

@@ -436,6 +436,21 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE_NAME = "suprbar"
 
 
+def startup_registered(default: bool = False) -> bool:
+    """Whether the HKCU Run value exists (the installer may have set it)."""
+    if sys.platform != "win32":
+        return default
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            winreg.QueryValueEx(key, RUN_VALUE_NAME)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return default
+
+
 def apply_startup_setting(enable: bool, run_bat_path: str | None = None) -> bool:
     """Sync the HKCU Run registry value to the desired state."""
     if sys.platform != "win32":
