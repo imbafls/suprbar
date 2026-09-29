@@ -16,7 +16,7 @@ No login. No telemetry. Your data stays on your machine.
 
 ---
 
-> **Status:** v2.0 — trimmed and stable. Five settings, a six-item tray menu,
+> **Status:** v2.1 — trimmed and stable. Five settings, a six-item tray menu,
 > ~40 MB and one process while the flyout is closed.
 
 ## What it does
