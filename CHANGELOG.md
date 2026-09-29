@@ -1,5 +1,25 @@
 # supr.bar CHANGELOG
 
+## v2.1.0 — spent vs. saved
+
+**New: spent vs. saved.** Pick your Claude plan in Settings (Pro, Max 5×,
+Max 20×) and the flyout shows, for every range, what you actually spent
+(the plan's share of those days plus any metered API spend) next to what you
+saved: Claude Code usage at API rates minus that plan share. With no plan
+set nothing changes. This is the one new setting, and the line it drives is
+the only thing that reads it.
+
+**Fixed:**
+- v2.0.0 could freeze and be closed by Windows as "not responding". Tray
+  clicks and menu items ran on the icon's message loop, and some of them
+  waited up to 5 seconds for the flyout process (or ran a rescan, or opened
+  the browser) there. They now run in the background, so the icon always
+  responds.
+- Start on login showed as off after installing with the "start on login"
+  box ticked; it now shows what Windows will actually do.
+- The per-day range index is kept as compact strings: about 3 MB instead of
+  13.6 MB of extra memory while the flyout is open.
+
 ## v2.0.0 — trimmed and stable
 
 supr.bar v2 is smaller on purpose: five settings, a six-item tray menu and a

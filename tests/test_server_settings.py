@@ -75,7 +75,7 @@ class SettingsApiTest(unittest.TestCase):
             "sources.local.enabled", "sources.anthropic_api.enabled",
             "sources.hermes.enabled", "sources.opencode.enabled",
             "sources.openrouter.enabled", "sources.openai.enabled",
-            "mini.enabled", "ui.pinned", "ui.start_on_login",
+            "mini.enabled", "ui.pinned", "ui.start_on_login", "plan.tier",
             "updates.check_on_launch"})
         self.assertEqual(set(body["keys"]),
                          {"anthropic_api", "openrouter", "openai"})
@@ -142,3 +142,12 @@ class SettingsApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanTierTest(unittest.TestCase):
+    def test_plan_tier_accepts_only_known_plans(self):
+        from suprbar import config as c
+        for tier in ("", "pro", "max5", "max20"):
+            self.assertEqual(c._coerce("plan.tier", tier), tier)
+        with self.assertRaises(ValueError):
+            c._coerce("plan.tier", "enterprise")

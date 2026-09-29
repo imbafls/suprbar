@@ -26,6 +26,9 @@ let timer = 0;
 let backoff = 2000;
 let loading = false;
 let settings = null;
+// Monthly subscription prices; mirrors config.PLAN_PRICES.
+const PLAN_USD = { pro: 20, max5: 100, max20: 200 };
+const PAID_API = new Set(['anthropic_api', 'openrouter', 'openai']);
 
 // ───────────── formatting ─────────────
 
@@ -133,6 +136,7 @@ function render(today, rng) {
   burn.hidden = !(range === 'today' && a);
   if (a) burn.textContent = `${money(a.burn_rate_usd_per_hour)}/h · ${projectName(a.project)}`;
 
+  renderSavings(today, rng);
   renderSources(today.sources || [], rng);
   renderBars(rng ? rng.by_day : today.hourly, !rng);
   renderList('projects', (rng || today).by_project, (p) => projectName(p.project));
@@ -140,6 +144,29 @@ function render(today, rng) {
 
   $('updated').textContent = 'updated ' + new Date().toLocaleTimeString([], {
     hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// Spent = the plan's share of this range + metered API spend.
+// Saved = what Claude Code would have cost at API rates, minus that share.
+function renderSavings(today, rng) {
+  const el = $('save');
+  const price = PLAN_USD[settings?.settings?.['plan.tier']] || 0;
+  el.hidden = !price;
+  if (!price) return;
+  const srcs = today.sources || [];
+  const days = rng ? Number(rng.range.days) || 1 : 1;
+  const planShare = price * 12 / 365 * days;
+  const local = srcs.find((x) => x.id === 'local');
+  const covered = rng ? Number(rng.totals.cost) || 0 : Number(local?.cost_today) || 0;
+  const metered = rng ? 0 : srcs.filter((x) => x.ok && PAID_API.has(x.id))
+    .reduce((n, x) => n + (Number(x.cost_today) || 0), 0);
+  const saved = covered - planShare;
+  el.dataset.state = saved >= 0 ? 'up' : 'down';
+  el.innerHTML = `spent <b>${money(planShare + metered)}</b> · `
+    + (saved >= 0 ? `saved <b>${money(saved)}</b>` : `plan ahead <b>${money(-saved)}</b>`);
+  el.title = `Plan share ${money(planShare)} for ${days} day${days === 1 ? '' : 's'}`
+    + (metered ? ` + ${money(metered)} metered API` : '')
+    + ` · Claude Code at API rates ${money(covered)}`;
 }
 
 function renderSources(sources, rng) {
@@ -247,6 +274,9 @@ function applySettings() {
   document.querySelectorAll('#sheet input[data-path]').forEach((el) => {
     el.checked = !!s[el.dataset.path];
   });
+  document.querySelectorAll('#sheet select[data-path]').forEach((el) => {
+    el.value = s[el.dataset.path] || '';
+  });
   $('version').textContent = 'supr.bar v' + settings.version;
 }
 
@@ -288,9 +318,10 @@ $('sheet').addEventListener('change', async (e) => {
   const el = e.target;
   if (!el?.dataset?.path) return;
   try {
-    await saveSettings({ settings: { [el.dataset.path]: el.checked } });
+    const value = el.tagName === 'SELECT' ? el.value : el.checked;
+    await saveSettings({ settings: { [el.dataset.path]: value } });
   } catch (_) {
-    el.checked = !el.checked;  // didn't stick: show the real state
+    applySettings();  // didn't stick: show the real state
   }
 });
 
@@ -357,6 +388,7 @@ window.addEventListener('pywebviewready', async () => {
   } catch (_) { /* not in the app window */ }
 });
 
-getJSON('/api/settings').then((s) => { settings = s; applySettings(); }).catch(() => {});
 checkUpdate();
-load(false);
+// Settings first: the savings line needs the plan on the first render.
+getJSON('/api/settings').then((s) => { settings = s; applySettings(); })
+  .catch(() => {}).finally(() => load(false));

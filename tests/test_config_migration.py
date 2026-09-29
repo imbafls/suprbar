@@ -63,7 +63,7 @@ class SchemaV5MigrationTest(unittest.TestCase):
 
     def test_v4_drops_every_removed_setting(self):
         cfg = _load(json.loads(json.dumps(V4)))
-        self.assertEqual(set(cfg), {"schema_version", "sources", "ui", "mini",
+        self.assertEqual(set(cfg), {"schema_version", "sources", "ui", "mini", "plan",
                                     "updates"})
         self.assertEqual(set(cfg["ui"]), {"pinned", "start_on_login"})
         self.assertEqual(set(cfg["mini"]), {"enabled"})
@@ -106,7 +106,7 @@ class SchemaV5MigrationTest(unittest.TestCase):
             "sources.local.enabled", "sources.anthropic_api.enabled",
             "sources.hermes.enabled", "sources.opencode.enabled",
             "sources.openrouter.enabled", "sources.openai.enabled",
-            "mini.enabled", "ui.pinned", "ui.start_on_login",
+            "mini.enabled", "ui.pinned", "ui.start_on_login", "plan.tier",
             "updates.check_on_launch", "updates.last_check",
             "updates.skip_version",
         })

@@ -34,6 +34,7 @@
       <div class="cost num" id="cost">$—</div>
       <div class="sub" id="sub">loading…</div>
       <div class="burn num" id="burn" hidden></div>
+      <div class="save" id="save" hidden></div>
     </section>
 
     <div class="sources" id="sources"></div>
@@ -63,6 +64,16 @@
     <div class="sheet-body">
       <h3>Sources</h3>
       <div id="srcRows"></div>
+      <h3>Plan</h3>
+      <label class="row">
+        <span>Claude subscription<small>Shows what you spend vs. what API rates would cost</small></span>
+        <select data-path="plan.tier">
+          <option value="">None (API)</option>
+          <option value="pro">Pro · $20/mo</option>
+          <option value="max5">Max 5× · $100/mo</option>
+          <option value="max20">Max 20× · $200/mo</option>
+        </select>
+      </label>
       <h3>General</h3>
       <label class="row">
         <span>Mini overlay<small>Always-on-top chip with the last 24h</small></span>

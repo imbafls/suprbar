@@ -74,6 +74,10 @@ DEFAULTS: dict[str, Any] = {
         "enabled": False,               # always-on-top rolling-24h chip
     },
 
+    "plan": {
+        "tier": "",                     # Claude subscription: "" | pro | max5 | max20
+    },
+
     "updates": {
         "check_on_launch": True,        # launch + 6-hourly release check
         "last_check":      "",          # internal: ISO-8601 of last check
@@ -290,10 +294,16 @@ SCHEMA: dict[str, str] = {
     "mini.enabled":                  "bool",
     "ui.pinned":                     "bool",
     "ui.start_on_login":             "bool",
+    "plan.tier":                     "plan",
     "updates.check_on_launch":       "bool",
     "updates.last_check":            "str",
     "updates.skip_version":          "str",
 }
+
+
+# Monthly Claude subscription prices (USD). Claude Code usage under a plan
+# is priced at API rates, which is what it would have cost without one.
+PLAN_PRICES: dict[str, int] = {"": 0, "pro": 20, "max5": 100, "max20": 200}
 
 
 def _coerce(path: str, value: Any) -> Any:
@@ -301,6 +311,10 @@ def _coerce(path: str, value: Any) -> Any:
     if typ is None:
         raise ValueError(f"unknown setting: {path}")
     # ValueError (not TypeError) throughout: callers turn it into a 400.
+    if typ == "plan":
+        if value not in PLAN_PRICES:
+            raise ValueError(f"{path} expects one of {sorted(PLAN_PRICES)}")
+        return value
     if typ == "bool":
         if not isinstance(value, bool):
             raise ValueError(f"{path} expects true/false, got {value!r}")

@@ -139,6 +139,10 @@ h3 {
 .cost { font-size: 40px; font-weight: 650; letter-spacing: -.03em; line-height: 1.05; }
 .sub { margin-top: 4px; font-size: 12px; color: var(--b-dim); }
 .burn { margin-top: 4px; font-size: 12px; color: var(--b-accent-hot); }
+.save { margin-top: 4px; font-size: 12px; color: var(--b-dim); }
+.save b { font-family: var(--b-mono); font-weight: 600; color: var(--b-text); }
+.save[data-state="up"] b:last-child { color: var(--b-success); }
+.save[data-state="down"] b:last-child { color: var(--b-warn); }
 
 /* ───────────── sources ───────────── */
 .sources { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 14px; flex: none; }
@@ -209,6 +213,11 @@ h3 {
   cursor: pointer;
 }
 .row > span { flex: 1; }
+.row select {
+  font: inherit; font-size: 12px; color: var(--b-text);
+  background: var(--b-surface-2); border: 1px solid var(--b-line-2);
+  border-radius: 6px; padding: 4px 6px;
+}
 .row small { display: block; font-size: 11px; color: var(--b-dimmer); }
 .row input[type="checkbox"] {
   appearance: none; width: 30px; height: 18px; flex: none; margin: 0;
