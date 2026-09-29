@@ -1,7 +1,12 @@
+import sys
 import threading
 import time
 
-from suprbar.tray import TrayApp
+import pytest
+
+# pystray needs a display on Linux; the tray only ships on Windows.
+pytestmark = pytest.mark.skipif(sys.platform != "win32",
+                                reason="tray is Windows-only")
 
 
 class _SlowBridge:
@@ -14,6 +19,7 @@ class _SlowBridge:
 
 
 def test_tray_click_never_blocks_the_message_loop():
+    from suprbar.tray import TrayApp
     bridge = _SlowBridge()
     tray = TrayApp(bridge)
     t0 = time.monotonic()
